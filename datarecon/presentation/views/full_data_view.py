@@ -1,0 +1,200 @@
+# datarecon/presentation/views/full_data_view.py — Module 6: Full Data Validation
+from __future__ import annotations
+
+import pandas as pd
+import streamlit as st
+
+from datarecon.application.services.full_data_validation_service import FullValidationRequest
+from datarecon.application.services.reporting_service import ReportPayload, ReportSection
+from datarecon.application.services.test_suite_service import serialize_request
+from datarecon.core.engine import ComparisonConfig
+from datarecon.domain.enums import ValidationModule
+from datarecon.presentation.components.connection_picker import connection_picker
+from datarecon.presentation.components.extraction_inputs import extraction_inputs
+from datarecon.presentation.components.report_export import (
+    render_csv_download_button,
+    render_export_buttons,
+)
+from datarecon.presentation.components.run_status import render_status_badge
+from datarecon.presentation.components.test_suite_save import render_save_suite_section
+from datarecon.presentation.container import ServiceContainer
+
+_MISMATCH_CELL_STYLE = "background-color: #ffcdd2; color: #7a0000"
+_MATCH_ROW_STYLE = "background-color: #c8e6c9; color: #0a4d0a"
+
+
+def _mismatches_by_column(mismatch: pd.DataFrame) -> pd.Series:
+    if mismatch.empty or "MISMATCHED_COLUMNS" not in mismatch.columns:
+        return pd.Series(dtype="int64")
+    exploded = mismatch["MISMATCHED_COLUMNS"].str.split(",").explode().str.strip()
+    exploded = exploded[exploded != ""]
+    return exploded.value_counts()
+
+
+def _highlight_mismatched_cells(row: pd.Series) -> list[str]:
+    mismatched_columns = {
+        c.strip() for c in str(row.get("MISMATCHED_COLUMNS", "")).split(",") if c.strip()
+    }
+    styles = []
+    for col in row.index:
+        base = col.removesuffix("_source").removesuffix("_target")
+        is_side_column = col.endswith("_source") or col.endswith("_target")
+        styles.append(_MISMATCH_CELL_STYLE if is_side_column and base in mismatched_columns else "")
+    return styles
+
+
+def _style_mismatch(mismatch: pd.DataFrame) -> object:
+    return mismatch.style.apply(_highlight_mismatched_cells, axis=1)
+
+
+def _style_matched(exact_match: pd.DataFrame) -> object:
+    return exact_match.style.apply(lambda row: [_MATCH_ROW_STYLE] * len(row), axis=1)
+
+
+def render(container: ServiceContainer) -> None:
+    st.header("Full Data Validation")
+    connections = container.connection_service.list_connections()
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("Source")
+        source_id = connection_picker("Source Connection", connections, key="fd_source")
+        source_query, source_table = extraction_inputs("Source", "fd_source")
+    with col2:
+        st.subheader("Target")
+        target_id = connection_picker("Target Connection", connections, key="fd_target")
+        target_query, target_table = extraction_inputs("Target", "fd_target")
+
+    business_keys_raw = st.text_input("Business Key(s), comma-separated", key="fd_keys")
+    with st.expander("Comparison Options"):
+        c1, c2, c3 = st.columns(3)
+        nulls_equal = c1.checkbox("NULL == NULL", value=True, key="fd_nulls_equal")
+        trim_strings = c2.checkbox("Trim strings", value=False, key="fd_trim")
+        ignore_case = c3.checkbox("Ignore case", value=False, key="fd_case")
+        float_tolerance = st.number_input(
+            "Float tolerance", min_value=0.0, value=0.0, format="%.6f", key="fd_float_tol"
+        )
+        drop_duplicate_keys = st.checkbox(
+            "Drop duplicate-key rows instead of failing", value=False, key="fd_drop_dups"
+        )
+
+    business_keys = [c.strip() for c in business_keys_raw.split(",") if c.strip()]
+    config = ComparisonConfig(
+        nulls_equal=nulls_equal,
+        trim_strings=trim_strings,
+        ignore_case=ignore_case,
+        float_tolerance=float(float_tolerance),
+        drop_duplicate_keys=drop_duplicate_keys,
+    )
+    request = FullValidationRequest(
+        source_connection_id=source_id or "",
+        target_connection_id=target_id or "",
+        business_keys=business_keys,
+        source_query=source_query,
+        source_table=source_table,
+        target_query=target_query,
+        target_table=target_table,
+        config=config,
+    )
+    if source_id and target_id:
+        render_save_suite_section(
+            container,
+            ValidationModule.FULL_DATA,
+            serialize_request(request),
+            key_prefix="full_data",
+            source_connection_id=source_id,
+            target_connection_id=target_id,
+        )
+
+    if st.button(
+        "Run Full Data Validation", type="primary", disabled=not (source_id and target_id)
+    ):
+        if source_id is None or target_id is None:
+            return
+        if not business_keys:
+            st.warning("At least one business key is required.")
+            return
+        try:
+            with st.spinner("Running full data comparison..."):
+                outcome = container.full_data_service.execute(request)
+        except Exception as exc:
+            st.error(f"Full data validation failed: {exc}")
+            return
+
+        result = outcome.result
+        render_status_badge(outcome.run.status, outcome.run.runtime_seconds)
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        c1.metric("Rows Compared", f"{result.summary['rows_compared']:,}")
+        c2.metric("Rows Matched", f"{result.summary['rows_matched']:,}")
+        c3.metric("Rows Missing", f"{result.summary['rows_missing_in_target']:,}")
+        c4.metric("Rows Extra", f"{result.summary['rows_extra_in_target']:,}")
+        c5.metric("Rows Mismatched", f"{result.summary['rows_mismatched']:,}")
+        c6.metric("Success Pct", f"{result.summary['success_percentage']:.4f}")
+
+        column_counts = _mismatches_by_column(result.mismatch)
+        if not column_counts.empty:
+            st.subheader("Mismatches by column")
+            st.bar_chart(column_counts)
+
+        st.subheader("Drill-down")
+        tab_missing, tab_extra, tab_mismatch, tab_match = st.tabs(
+            ["Missing", "Extra", "Mismatch", "Matched"]
+        )
+        with tab_missing:
+            st.dataframe(result.missing_in_target, use_container_width=True, hide_index=True)
+            render_csv_download_button(
+                container.reporting_service,
+                "Missing",
+                result.missing_in_target,
+                key="fd_dl_missing",
+                label="Download missing CSV",
+            )
+        with tab_extra:
+            st.dataframe(result.extra_in_target, use_container_width=True, hide_index=True)
+            render_csv_download_button(
+                container.reporting_service,
+                "Extra",
+                result.extra_in_target,
+                key="fd_dl_extra",
+                label="Download extra CSV",
+            )
+        with tab_mismatch:
+            if result.mismatch.empty:
+                st.dataframe(result.mismatch, use_container_width=True, hide_index=True)
+            else:
+                st.dataframe(
+                    _style_mismatch(result.mismatch), use_container_width=True, hide_index=True
+                )
+            render_csv_download_button(
+                container.reporting_service,
+                "Mismatch",
+                result.mismatch,
+                key="fd_dl_mismatch",
+                label="Download mismatch CSV",
+            )
+        with tab_match:
+            if result.exact_match.empty:
+                st.dataframe(result.exact_match, use_container_width=True, hide_index=True)
+            else:
+                st.dataframe(
+                    _style_matched(result.exact_match), use_container_width=True, hide_index=True
+                )
+            render_csv_download_button(
+                container.reporting_service,
+                "Matched",
+                result.exact_match,
+                key="fd_dl_matched",
+                label="Download matched CSV",
+            )
+
+        st.divider()
+        payload = ReportPayload(
+            title="Full Data Validation",
+            summary=result.summary,
+            sections=(
+                ReportSection("Mismatches", result.mismatch),
+                ReportSection("Missing in Target", result.missing_in_target),
+                ReportSection("Extra in Target", result.extra_in_target),
+            ),
+        )
+        render_export_buttons(container.reporting_service, payload, key_prefix="full_data")
