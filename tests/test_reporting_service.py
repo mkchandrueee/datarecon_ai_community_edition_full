@@ -77,6 +77,21 @@ def test_csv_export_falls_back_to_summary_when_no_sections(service: ReportingSer
     assert "target_count,10" in text
 
 
+def test_csv_line_endings_are_lf_on_every_platform(service: ReportingService) -> None:
+    """Pinned so a report built on Windows matches one built on Linux, and the
+    banner lines never mix with pandas' CRLF inside a single file."""
+    payload = ReportPayload(
+        title="x",
+        summary={"rows": 1},
+        sections=(
+            ReportSection("A", pd.DataFrame({"a": [1]})),
+            ReportSection("B", pd.DataFrame({"b": [2]})),
+        ),
+    )
+    for shape in (payload, ReportPayload(title="x", summary={"rows": 1})):
+        assert b"\r\n" not in service.export(shape, ReportFormat.CSV)
+
+
 def test_csv_export_of_empty_section_still_emits_header(service: ReportingService) -> None:
     payload = ReportPayload(
         title="x",

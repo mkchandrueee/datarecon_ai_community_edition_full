@@ -132,17 +132,28 @@ class ReportingService:
         """CSV for any payload shape. CSV is a single flat table, so a report
         with no data sections falls back to its summary metrics, and one with
         several stacks them under `# <section title>` banner lines — every
-        module offers a working CSV download rather than a dead 'n/a' button."""
-        if len(payload.sections) == 1:
-            return payload.sections[0].dataframe.to_csv(index=False).encode("utf-8")
-        if not payload.sections:
-            return self._summary_frame(payload).to_csv(index=False).encode("utf-8")
+        module offers a working CSV download rather than a dead 'n/a' button.
 
-        blocks = [f"# {self._SUMMARY_TITLE}", self._summary_frame(payload).to_csv(index=False)]
+        Line endings are pinned to \\n rather than the platform default, so a
+        report generated on Windows is byte-identical to one from Linux and the
+        banner lines can't end up mixed with pandas' CRLF inside one file."""
+        if len(payload.sections) == 1:
+            return self._frame_to_csv(payload.sections[0].dataframe)
+        if not payload.sections:
+            return self._frame_to_csv(self._summary_frame(payload))
+
+        blocks = [f"# {self._SUMMARY_TITLE}", self._csv_text(self._summary_frame(payload))]
         for section in payload.sections:
             blocks.append(f"# {section.title}")
-            blocks.append(section.dataframe.to_csv(index=False))
+            blocks.append(self._csv_text(section.dataframe))
         return "\n".join(blocks).encode("utf-8")
+
+    @staticmethod
+    def _csv_text(df: pd.DataFrame) -> str:
+        return df.to_csv(index=False, lineterminator="\n")
+
+    def _frame_to_csv(self, df: pd.DataFrame) -> bytes:
+        return self._csv_text(df).encode("utf-8")
 
     @staticmethod
     def _summary_frame(payload: ReportPayload) -> pd.DataFrame:
