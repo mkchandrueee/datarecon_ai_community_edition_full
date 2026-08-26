@@ -175,6 +175,24 @@ class ValidationModule(StrEnum):
     PROFILING = "Data Profiling"
     FILE_COMPARISON = "File Comparison"
 
+    @property
+    def code(self) -> str:
+        """Short prefix stamped onto Test Suite names (RC_CUSTOMER_MASTER),
+        so a suite's module is readable at a glance in lists and reports."""
+        return _MODULE_CODES[self]
+
+
+_MODULE_CODES = {
+    ValidationModule.SCHEMA: "SC",
+    ValidationModule.RECORD_COUNT: "RC",
+    ValidationModule.DUPLICATE: "DV",
+    ValidationModule.NULLABILITY: "NV",
+    ValidationModule.AGGREGATION: "AG",
+    ValidationModule.FULL_DATA: "FD",
+    ValidationModule.PROFILING: "DP",
+    ValidationModule.FILE_COMPARISON: "FC",
+}
+
 
 class RunStatus(StrEnum):
     PASS = "PASS"

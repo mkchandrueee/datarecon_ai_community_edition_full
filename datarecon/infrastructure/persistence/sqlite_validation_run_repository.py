@@ -15,7 +15,7 @@ from datarecon.infrastructure.persistence.metadata_db import MetadataDatabase
 _COLUMNS = (
     "run_id, module, name, status, summary_json, source_connection_id, "
     "target_connection_id, error_message, runtime_seconds, project_id, suite_id, "
-    "started_at, finished_at"
+    "archived, started_at, finished_at"
 )
 
 
@@ -37,12 +37,13 @@ class SQLiteValidationRunRepository(IValidationRunRepository):
             runtime_seconds=row["runtime_seconds"],
             project_id=row["project_id"],
             suite_id=row["suite_id"],
+            archived=bool(row["archived"]),
             started_at=datetime.fromisoformat(row["started_at"]),
             finished_at=datetime.fromisoformat(row["finished_at"]),
         )
 
     def add(self, run: ValidationRun) -> ValidationRun:
-        placeholders = ", ".join(["?"] * 13)
+        placeholders = ", ".join(["?"] * 14)
         with self._db.cursor() as cur:
             cur.execute(
                 f"INSERT INTO validation_runs ({_COLUMNS}) VALUES ({placeholders})",
@@ -58,6 +59,7 @@ class SQLiteValidationRunRepository(IValidationRunRepository):
                     run.runtime_seconds,
                     run.project_id,
                     run.suite_id,
+                    int(run.archived),
                     run.started_at.isoformat(),
                     run.finished_at.isoformat(),
                 ),
@@ -99,12 +101,22 @@ class SQLiteValidationRunRepository(IValidationRunRepository):
             rows = cur.fetchall()
         return [self._row_to_entity(r) for r in rows]
 
+    def set_archived(self, run_id: str, archived: bool) -> bool:
+        """Archive or restore one run. Returns False if the run doesn't exist."""
+        with self._db.cursor() as cur:
+            cur.execute(
+                "UPDATE validation_runs SET archived=? WHERE run_id=?",
+                (int(archived), run_id),
+            )
+            return cur.rowcount > 0
+
     def list_filtered(
         self,
         project_id: str | None = None,
         module: ValidationModule | None = None,
         suite_id: str | None = None,
         limit: int = 200,
+        include_archived: bool = False,
     ) -> list[ValidationRun]:
         clauses = []
         params: list[str] = []
@@ -117,6 +129,8 @@ class SQLiteValidationRunRepository(IValidationRunRepository):
         if suite_id is not None:
             clauses.append("suite_id=?")
             params.append(suite_id)
+        if not include_archived:
+            clauses.append("archived=0")
         where = f"WHERE {' AND '.join(clauses)} " if clauses else ""
         with self._db.cursor() as cur:
             cur.execute(

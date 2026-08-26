@@ -147,3 +147,74 @@ def test_pass_rate_trend_filters_by_project(service: DashboardService, run_repos
     trend = service.pass_rate_trend(project_id="proj-a")
     assert len(trend) == 1
     assert trend.iloc[0]["pass_rate_percent"] == 100.0
+
+
+# ---------- project report export (overall results, PDF/Excel/CSV) ----------
+
+def _add(run_repository, status, module=ValidationModule.RECORD_COUNT) -> ValidationRun:
+    """Seed one run and hand it back, for tests that need its id or name."""
+    run = ValidationRun(
+        module=module,
+        name=f"{module.value} {status.value}",
+        status=status,
+        started_at=datetime.now(UTC),
+        finished_at=datetime.now(UTC),
+    )
+    return run_repository.add(run)
+
+
+
+
+def test_project_report_summary_matches_widgets(service, run_repository) -> None:
+    _add(run_repository, RunStatus.PASS)
+    _add(run_repository, RunStatus.PASS)
+    _add(run_repository, RunStatus.FAIL)
+
+    report = service.project_report("All Projects")
+
+    assert report.project_name == "All Projects"
+    assert report.summary["total_runs"] == 3
+    assert report.summary["passed"] == 2
+    assert report.summary["failed"] == 1
+    assert report.summary["pass_rate_percent"] == pytest.approx(66.67, abs=0.01)
+
+
+def test_project_report_sections_drop_empty_tables(service) -> None:
+    report = service.project_report("Empty")
+    assert report.sections() == []
+
+
+def test_project_report_sections_are_named_and_ordered(service, run_repository) -> None:
+    _add(run_repository, RunStatus.PASS)
+
+    titles = [title for title, _ in service.project_report("P").sections()]
+
+    assert titles == ["Runs by Module", "Pass Rate Trend", "Run History"]
+
+
+def test_run_history_lists_each_run(service, run_repository) -> None:
+    _add(run_repository, RunStatus.PASS)
+    _add(run_repository, RunStatus.FAIL)
+
+    history = service.run_history()
+
+    assert len(history) == 2
+    assert set(history["status"]) == {"PASS", "FAIL"}
+
+
+def test_run_history_is_empty_frame_with_columns_when_no_runs(service) -> None:
+    history = service.run_history()
+    assert history.empty
+    assert "started_at" in history.columns
+
+
+def test_archived_runs_are_excluded_from_the_dashboard(service, run_repository) -> None:
+    kept = _add(run_repository, RunStatus.PASS)
+    archived = _add(run_repository, RunStatus.FAIL)
+    run_repository.set_archived(archived.run_id, True)
+
+    widgets = service.widgets()
+
+    assert widgets.total_runs == 1
+    assert widgets.failed == 0
+    assert service.run_history()["name"].tolist() == [kept.name]

@@ -22,6 +22,7 @@ import pandas as pd
 
 from datarecon.application.services.data_extraction_service import DataExtractionService
 from datarecon.application.services.run_recording import record_run
+from datarecon.core.column_matching import canonical_map
 from datarecon.domain.entities.column_catalog_metadata import ColumnCatalogMetadata
 from datarecon.domain.entities.project import DEFAULT_PROJECT_ID
 from datarecon.domain.entities.validation_run import ValidationRun
@@ -160,18 +161,33 @@ class SchemaValidationService:
         source_catalog: list[ColumnCatalogMetadata] | None = None,
         target_catalog: list[ColumnCatalogMetadata] | None = None,
     ) -> pd.DataFrame:
-        source_positions = {c: i for i, c in enumerate(source_df.columns)}
-        target_positions = {c: i for i, c in enumerate(target_df.columns)}
-        all_columns = list(dict.fromkeys([*source_df.columns, *target_df.columns]))
-        source_catalog_by_name = {c.name: c for c in source_catalog} if source_catalog else None
-        target_catalog_by_name = {c.name: c for c in target_catalog} if target_catalog else None
+        # Keyed by case-folded name so a source CUSTOMER_ID and a target
+        # customer_id are recognised as the same column instead of being
+        # reported as both MISSING_IN_TARGET and EXTRA_IN_TARGET. The name
+        # shown is whichever side actually has it, source winning.
+        source_actual = canonical_map(source_df.columns)
+        target_actual = canonical_map(target_df.columns)
+        source_positions = {str(c).casefold(): i for i, c in enumerate(source_df.columns)}
+        target_positions = {str(c).casefold(): i for i, c in enumerate(target_df.columns)}
+        all_columns = list(dict.fromkeys([*source_positions, *target_positions]))
+        source_catalog_by_name = (
+            {c.name.casefold(): c for c in source_catalog} if source_catalog else None
+        )
+        target_catalog_by_name = (
+            {c.name.casefold(): c for c in target_catalog} if target_catalog else None
+        )
 
         rows = []
-        for col in all_columns:
-            in_source = col in source_positions
-            in_target = col in target_positions
-            source_type = _dtype_category(source_df[col].dtype) if in_source else None
-            target_type = _dtype_category(target_df[col].dtype) if in_target else None
+        for key in all_columns:
+            in_source = key in source_positions
+            in_target = key in target_positions
+            col = source_actual.get(key) or target_actual[key]
+            source_type = (
+                _dtype_category(source_df[source_actual[key]].dtype) if in_source else None
+            )
+            target_type = (
+                _dtype_category(target_df[target_actual[key]].dtype) if in_target else None
+            )
 
             if not in_target:
                 status = "MISSING_IN_TARGET"
@@ -179,13 +195,13 @@ class SchemaValidationService:
                 status = "EXTRA_IN_TARGET"
             elif source_type != target_type:
                 status = "TYPE_MISMATCH"
-            elif source_positions[col] != target_positions[col]:
+            elif source_positions[key] != target_positions[key]:
                 status = "POSITION_MISMATCH"
             else:
                 status = "MATCH"
 
-            source_meta = source_catalog_by_name.get(col) if source_catalog_by_name else None
-            target_meta = target_catalog_by_name.get(col) if target_catalog_by_name else None
+            source_meta = source_catalog_by_name.get(key) if source_catalog_by_name else None
+            target_meta = target_catalog_by_name.get(key) if target_catalog_by_name else None
 
             length_match = key_match = default_match = None
             if source_meta is not None and target_meta is not None:
@@ -196,8 +212,8 @@ class SchemaValidationService:
             rows.append(
                 {
                     "column": col,
-                    "source_position": source_positions.get(col),
-                    "target_position": target_positions.get(col),
+                    "source_position": source_positions.get(key),
+                    "target_position": target_positions.get(key),
                     "source_type": source_type,
                     "target_type": target_type,
                     "status": status,

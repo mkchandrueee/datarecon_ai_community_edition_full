@@ -191,3 +191,60 @@ def test_list_filtered_by_project_module_and_suite(repo: SQLiteValidationRunRepo
         project_id="proj-a", module=ValidationModule.SCHEMA, suite_id="suite-1"
     )
     assert [r.name for r in results] == ["a"]
+
+
+# ---------- manual archiving ----------
+
+
+def _added_run(repo, **kwargs) -> ValidationRun:
+    defaults = {
+        "module": ValidationModule.RECORD_COUNT,
+        "name": "RC_ORDERS",
+        "status": RunStatus.FAIL,
+    }
+    return repo.add(ValidationRun(**{**defaults, **kwargs}))
+
+
+def test_runs_are_not_archived_by_default(repo) -> None:
+    run = _added_run(repo)
+    assert repo.get_by_id(run.run_id).archived is False
+
+
+def test_set_archived_hides_run_from_default_listing(repo) -> None:
+    run = _added_run(repo)
+    assert repo.set_archived(run.run_id, True) is True
+
+    visible = repo.list_filtered()
+    assert run.run_id not in [r.run_id for r in visible]
+
+    with_archived = repo.list_filtered(include_archived=True)
+    assert run.run_id in [r.run_id for r in with_archived]
+
+
+def test_archived_flag_round_trips(repo) -> None:
+    run = _added_run(repo)
+    repo.set_archived(run.run_id, True)
+    assert repo.get_by_id(run.run_id).archived is True
+
+
+def test_archiving_is_reversible(repo) -> None:
+    run = _added_run(repo)
+    repo.set_archived(run.run_id, True)
+    repo.set_archived(run.run_id, False)
+
+    assert repo.get_by_id(run.run_id).archived is False
+    assert run.run_id in [r.run_id for r in repo.list_filtered()]
+
+
+def test_set_archived_on_unknown_run_returns_false(repo) -> None:
+    assert repo.set_archived("does-not-exist", True) is False
+
+
+def test_archive_respects_other_filters(repo) -> None:
+    kept = _added_run(repo, project_id="p1")
+    archived = _added_run(repo, project_id="p1")
+    _added_run(repo, project_id="p2")
+    repo.set_archived(archived.run_id, True)
+
+    visible = repo.list_filtered(project_id="p1")
+    assert [r.run_id for r in visible] == [kept.run_id]

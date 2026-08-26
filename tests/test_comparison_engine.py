@@ -196,3 +196,63 @@ class TestScale:
         s = ComparisonEngine(["K"]).compare(src, tgt).summary
         assert s["rows_mismatched"] == 1000
         assert s["rows_matched"] == n - 1000
+
+
+class TestCaseInsensitiveColumnNames:
+    """Databases disagree on identifier casing, so the same logical column can
+    arrive as CUSTOMER_ID on one side and customer_id on the other."""
+
+    def test_target_columns_differing_only_by_case_are_matched(self):
+        src = pd.DataFrame({"CUSTOMER_ID": [1, 2], "EMAIL": ["a@x", "b@x"]})
+        tgt = pd.DataFrame({"customer_id": [1, 2], "email": ["a@x", "b@x"]})
+
+        result = ComparisonEngine(["CUSTOMER_ID"]).compare(src, tgt)
+
+        assert result.summary["rows_matched"] == 2
+        assert result.summary["rows_missing_in_target"] == 0
+        assert result.summary["rows_extra_in_target"] == 0
+
+    def test_business_key_typed_in_other_case_still_resolves(self):
+        src = pd.DataFrame({"CUSTOMER_ID": [1, 2], "EMAIL": ["a@x", "b@x"]})
+        tgt = pd.DataFrame({"CUSTOMER_ID": [1, 2], "EMAIL": ["a@x", "b@x"]})
+
+        result = ComparisonEngine(["customer_id"]).compare(src, tgt)
+
+        assert result.summary["rows_matched"] == 2
+
+    def test_source_spelling_is_canonical_in_output(self):
+        src = pd.DataFrame({"CUSTOMER_ID": [1], "EMAIL": ["a@x"]})
+        tgt = pd.DataFrame({"customer_id": [1], "email": ["b@x"]})
+
+        result = ComparisonEngine(["CUSTOMER_ID"]).compare(src, tgt)
+
+        assert result.summary["rows_mismatched"] == 1
+        assert "EMAIL" in result.mismatch["MISMATCHED_COLUMNS"].iloc[0]
+
+    def test_mismatched_values_still_detected_across_casing(self):
+        src = pd.DataFrame({"ID": [1, 2], "AMT": [10, 20]})
+        tgt = pd.DataFrame({"id": [1, 2], "amt": [10, 99]})
+
+        result = ComparisonEngine(["ID"]).compare(src, tgt)
+
+        assert result.summary["rows_matched"] == 1
+        assert result.summary["rows_mismatched"] == 1
+
+    def test_compare_columns_resolve_case_insensitively(self):
+        src = pd.DataFrame({"ID": [1], "AMT": [10], "NOTE": ["x"]})
+        tgt = pd.DataFrame({"id": [1], "amt": [99], "note": ["y"]})
+
+        config = ComparisonConfig(compare_columns=["amt"])
+        result = ComparisonEngine(["ID"], config).compare(src, tgt)
+
+        assert result.summary["rows_mismatched"] == 1
+        assert "AMT" in result.mismatch["MISMATCHED_COLUMNS"].iloc[0]
+        assert "NOTE" not in result.mismatch["MISMATCHED_COLUMNS"].iloc[0]
+
+    def test_can_be_disabled(self):
+        src = pd.DataFrame({"CUSTOMER_ID": [1]})
+        tgt = pd.DataFrame({"customer_id": [1]})
+
+        config = ComparisonConfig(case_insensitive_columns=False)
+        with pytest.raises(SchemaAlignmentError, match="not found in target"):
+            ComparisonEngine(["CUSTOMER_ID"], config).compare(src, tgt)

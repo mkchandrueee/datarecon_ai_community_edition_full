@@ -8,6 +8,7 @@ from typing import Any
 
 import streamlit as st
 
+from datarecon.application.services.test_suite_service import prefixed_name
 from datarecon.domain.enums import ValidationModule
 from datarecon.presentation.container import ServiceContainer
 
@@ -32,6 +33,10 @@ def render_save_suite_section(
             "Project", project_names, key=f"{key_prefix}_suite_project"
         )
         suite_name = st.text_input("Test Suite Name", key=f"{key_prefix}_suite_name")
+        if suite_name.strip():
+            st.caption(f"Will be saved as **{prefixed_name(module, suite_name)}**")
+        else:
+            st.caption(f"Saved names are prefixed with `{module.code}_` for this module.")
         description = st.text_input(
             "Description (optional)", key=f"{key_prefix}_suite_description"
         )
@@ -41,7 +46,7 @@ def render_save_suite_section(
                 return
             project = next(p for p in projects if p.name == project_choice)
             try:
-                container.test_suite_service.save_suite(
+                saved = container.test_suite_service.save_suite(
                     project_id=project.project_id,
                     name=suite_name,
                     module=module,
@@ -50,6 +55,6 @@ def render_save_suite_section(
                     source_connection_id=source_connection_id,
                     target_connection_id=target_connection_id,
                 )
-                st.success(f"Saved test suite '{suite_name}' under project '{project.name}'.")
+                st.success(f"Saved test suite '{saved.name}' under project '{project.name}'.")
             except ValueError as exc:
                 st.error(str(exc))

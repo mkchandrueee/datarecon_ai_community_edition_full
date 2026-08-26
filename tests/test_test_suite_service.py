@@ -33,6 +33,7 @@ from datarecon.application.services.schema_validation_service import (
 from datarecon.application.services.test_suite_service import (
     TestSuiteError,
     TestSuiteService,
+    prefixed_name,
     serialize_request,
 )
 from datarecon.core.engine import ComparisonConfig
@@ -80,7 +81,7 @@ def test_save_suite(service: TestSuiteService) -> None:
         source_connection_id="src",
         target_connection_id="tgt",
     )
-    assert suite.name == "Customers schema"
+    assert suite.name == "SC_Customers schema"  # module code prefix
     assert service.get_suite(suite.suite_id) is not None
 
 
@@ -125,7 +126,7 @@ def test_list_suites_filters_by_project(
         config=_basic_config(),
     )
 
-    assert [s.name for s in service.list_suites("default")] == ["a"]
+    assert [s.name for s in service.list_suites("default")] == ["SC_a"]
     assert len(service.list_suites()) == 2
 
 
@@ -164,7 +165,7 @@ def test_run_suite_tags_run_with_suite_id_and_name(service: TestSuiteService) ->
     outcome = service.run_suite(suite.suite_id)
     assert outcome.run is not None
     assert outcome.run.suite_id == suite.suite_id
-    assert outcome.run.name == "Nightly schema check"
+    assert outcome.run.name == "SC_Nightly schema check"
 
 
 def test_run_suite_record_count_with_group_by(service: TestSuiteService) -> None:
@@ -269,3 +270,53 @@ def test_run_suite_records_error_for_missing_connection(service: TestSuiteServic
     refreshed = service.get_suite(suite.suite_id)
     assert refreshed is not None
     assert refreshed.last_run_status == RunStatus.ERROR
+
+
+# ---------- module-code name prefixing ----------
+
+
+def test_prefixed_name_stamps_module_code() -> None:
+    assert (
+        prefixed_name(ValidationModule.RECORD_COUNT, "CUSTOMER_MASTER")
+        == "RC_CUSTOMER_MASTER"
+    )
+    assert prefixed_name(ValidationModule.SCHEMA, "ORDERS") == "SC_ORDERS"
+    assert prefixed_name(ValidationModule.FULL_DATA, "ORDERS") == "FD_ORDERS"
+
+
+def test_prefixed_name_is_idempotent() -> None:
+    once = prefixed_name(ValidationModule.RECORD_COUNT, "CUSTOMER_MASTER")
+    assert prefixed_name(ValidationModule.RECORD_COUNT, once) == once
+
+
+def test_prefixed_name_normalises_existing_prefix_case() -> None:
+    assert prefixed_name(ValidationModule.RECORD_COUNT, "rc_ORDERS") == "RC_ORDERS"
+
+
+def test_prefixed_name_trims_whitespace() -> None:
+    assert prefixed_name(ValidationModule.SCHEMA, "  ORDERS  ") == "SC_ORDERS"
+
+
+def test_save_suite_applies_the_prefix(service: TestSuiteService) -> None:
+    suite = service.save_suite(
+        project_id="default",
+        name="CUSTOMER_MASTER",
+        module=ValidationModule.RECORD_COUNT,
+        config=_basic_config(),
+    )
+    assert suite.name == "RC_CUSTOMER_MASTER"
+
+
+def test_save_suite_does_not_double_prefix(service: TestSuiteService) -> None:
+    suite = service.save_suite(
+        project_id="default",
+        name="RC_CUSTOMER_MASTER",
+        module=ValidationModule.RECORD_COUNT,
+        config=_basic_config(),
+    )
+    assert suite.name == "RC_CUSTOMER_MASTER"
+
+
+def test_every_module_has_a_distinct_code() -> None:
+    codes = [m.code for m in ValidationModule]
+    assert len(codes) == len(set(codes))

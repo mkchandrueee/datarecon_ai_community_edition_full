@@ -21,6 +21,7 @@ from datarecon.application.services.project_service import ProjectService
 from datarecon.application.services.record_count_service import RecordCountService
 from datarecon.application.services.reporting_service import ReportingService
 from datarecon.application.services.schema_validation_service import SchemaValidationService
+from datarecon.application.services.suite_report_service import SuiteReportService
 from datarecon.application.services.test_suite_service import TestSuiteService
 from datarecon.infrastructure.connectors.engine_factory import EngineFactory
 from datarecon.infrastructure.extraction.data_extractor import DataExtractor
@@ -124,6 +125,7 @@ def build_container() -> ServiceContainer:
             aggregation_service,
             full_data_service,
         ),
+        suite_report_service=SuiteReportService(test_suite_repository, run_repository),
         run_repository=run_repository,
         detail_store=detail_store,
     )

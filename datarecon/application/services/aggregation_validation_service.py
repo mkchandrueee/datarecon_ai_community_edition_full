@@ -10,6 +10,7 @@ import pandas as pd
 
 from datarecon.application.services.data_extraction_service import DataExtractionService
 from datarecon.application.services.run_recording import record_run
+from datarecon.core.column_matching import align_to_source, resolve, resolve_all
 from datarecon.core.engine.duckdb_engine import (
     duckdb_connection,
     query_df,
@@ -85,7 +86,15 @@ class AggregationValidationService:
             target_df = self._extraction.extract_dataframe(
                 request.target_connection_id, query=request.target_query, table=request.target_table
             )
-            group_cols = list(request.group_by)
+            # One agreed spelling per column before aggregating, so the
+            # per-metric merge below lines up even when the two databases
+            # disagree on identifier casing (ADR-0009).
+            target_df = align_to_source(source_df, target_df)
+            group_cols, missing_groups = resolve_all(list(request.group_by), source_df.columns)
+            if missing_groups:
+                raise AggregationValidationError(
+                    f"Group-by column(s) not found: {missing_groups}"
+                )
             comparison = pd.concat(
                 [
                     self._compare_one(
@@ -185,23 +194,26 @@ class AggregationValidationService:
     def _compute_aggregate(
         df: pd.DataFrame, group_cols: list[str], spec: AggregationSpec, alias: str
     ) -> pd.DataFrame:
-        if spec.column not in df.columns:
+        # Both sides were aligned to the source's spelling by execute(), so a
+        # name typed in any case resolves to the one the frames actually use.
+        column = resolve(spec.column, df.columns)
+        if column is None:
             raise AggregationValidationError(f"Aggregation column '{spec.column}' not found.")
-        missing_group = [c for c in group_cols if c not in df.columns]
+        resolved_groups, missing_group = resolve_all(group_cols, df.columns)
         if missing_group:
             raise AggregationValidationError(f"Group-by column(s) not found: {missing_group}")
 
         with duckdb_connection() as con, registered_view(con, "t", df) as view:
-            col_q = quote_identifier(spec.column)
+            col_q = quote_identifier(column)
             if spec.function == AggregateFunction.COUNT_DISTINCT:
                 expr = f"COUNT(DISTINCT {col_q})"
             elif spec.function == AggregateFunction.COUNT:
                 expr = f"COUNT({col_q})"
             else:
                 expr = f"{spec.function.value}({col_q})"
-            group_select = ", ".join(quote_identifier(c) for c in group_cols)
+            group_select = ", ".join(quote_identifier(c) for c in resolved_groups)
             select_cols = (
-                f"{group_select}, " if group_cols else ""
+                f"{group_select}, " if resolved_groups else ""
             ) + f"{expr} AS {quote_identifier(alias)}"
-            group_clause = f" GROUP BY {group_select}" if group_cols else ""
+            group_clause = f" GROUP BY {group_select}" if resolved_groups else ""
             return query_df(con, f"SELECT {select_cols} FROM {view}{group_clause}")

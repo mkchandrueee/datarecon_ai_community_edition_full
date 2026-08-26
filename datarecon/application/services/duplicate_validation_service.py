@@ -10,6 +10,7 @@ import pandas as pd
 
 from datarecon.application.services.data_extraction_service import DataExtractionService
 from datarecon.application.services.run_recording import record_run
+from datarecon.core.column_matching import resolve_all
 from datarecon.core.engine.duckdb_engine import (
     duckdb_connection,
     query_df,
@@ -117,7 +118,9 @@ class DuplicateValidationService:
     def _analyze(
         df: pd.DataFrame, key_columns: list[str], sample_limit: int
     ) -> tuple[int, int, int, pd.DataFrame]:
-        missing = [c for c in key_columns if c not in df.columns]
+        # Resolve case-insensitively (ADR-0009): a key typed as customer_id
+        # still finds the CUSTOMER_ID the database actually returned.
+        key_columns, missing = resolve_all(key_columns, df.columns)
         if missing:
             raise DuplicateValidationError(f"Key column(s) not found: {missing}")
 

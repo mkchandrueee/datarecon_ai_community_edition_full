@@ -26,10 +26,15 @@ class IValidationRunRepository(ABC):
     def list_by_project(self, project_id: str, limit: int = 200) -> list[ValidationRun]: ...
 
     @abstractmethod
+    def set_archived(self, run_id: str, archived: bool) -> bool:
+        """Archive or restore a run. False if no such run."""
+
+    @abstractmethod
     def list_filtered(
         self,
         project_id: str | None = None,
         module: ValidationModule | None = None,
         suite_id: str | None = None,
         limit: int = 200,
+        include_archived: bool = False,
     ) -> list[ValidationRun]: ...

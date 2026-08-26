@@ -230,3 +230,45 @@ def test_custom_query_skips_catalog_lookup_even_with_table_set(run_repository, d
     )
     # source side used a query, so its catalog is never fetched -> nothing to compare
     assert result.comparison["length_match"].isna().all()
+
+
+# ---------- case-insensitive column names (ADR-0009) ----------
+
+
+def test_case_only_column_difference_is_a_match(run_repository, detail_store) -> None:
+    """Without case-folding this reports the same column as both
+    MISSING_IN_TARGET and EXTRA_IN_TARGET."""
+    frames = {
+        "src": pd.DataFrame({"CUSTOMER_ID": [1], "EMAIL": ["a@x"]}),
+        "tgt": pd.DataFrame({"customer_id": [1], "email": ["a@x"]}),
+    }
+    service = SchemaValidationService(
+        FakeExtractionService(frames), run_repository, detail_store
+    )
+
+    result = service.execute(
+        SchemaValidationRequest(source_connection_id="src", target_connection_id="tgt")
+    )
+
+    assert result.status == RunStatus.PASS
+    assert (result.comparison["status"] == "MATCH").all()
+    assert len(result.comparison) == 2
+    assert set(result.comparison["column"]) == {"CUSTOMER_ID", "EMAIL"}
+
+
+def test_genuinely_missing_column_still_reported(run_repository, detail_store) -> None:
+    frames = {
+        "src": pd.DataFrame({"CUSTOMER_ID": [1], "EMAIL": ["a@x"]}),
+        "tgt": pd.DataFrame({"customer_id": [1]}),
+    }
+    service = SchemaValidationService(
+        FakeExtractionService(frames), run_repository, detail_store
+    )
+
+    result = service.execute(
+        SchemaValidationRequest(source_connection_id="src", target_connection_id="tgt")
+    )
+
+    by_column = result.comparison.set_index("column")["status"]
+    assert by_column["CUSTOMER_ID"] == "MATCH"
+    assert by_column["EMAIL"] == "MISSING_IN_TARGET"

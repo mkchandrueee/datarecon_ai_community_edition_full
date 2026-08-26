@@ -7,8 +7,14 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
+from datarecon.application.services.reporting_service import ReportPayload, ReportSection
 from datarecon.domain.entities.test_suite import TestSuite
+from datarecon.presentation.components.report_export import (
+    render_csv_download_button,
+    render_export_buttons,
+)
 from datarecon.presentation.components.run_status import render_status_badge
+from datarecon.presentation.components.summary_table import render_summary_table
 from datarecon.presentation.container import ServiceContainer
 
 _ALL_PROJECTS = "All Projects"
@@ -65,6 +71,44 @@ def _render_suite_details(container: ServiceContainer, suite: TestSuite) -> None
         st.json(other_params)
 
 
+def _render_module_reports(container: ServiceContainer, project_id: str | None) -> None:
+    """Per-module tables of what each suite last measured, plus a combined
+    export — the suite list alone says whether a suite passed, not by how much."""
+    reports = container.suite_report_service.module_reports(project_id)
+    if not reports:
+        return
+
+    st.subheader("Module-wise Report")
+    for report in reports:
+        module = report.module
+        with st.expander(
+            f"{module.value} — {report.suite_count} suite(s), "
+            f"{report.passed} passed / {report.failed} failed",
+            expanded=True,
+        ):
+            st.dataframe(report.table, use_container_width=True, hide_index=True)
+            render_csv_download_button(
+                container.reporting_service,
+                f"{module.code}_Report",
+                report.table,
+                key=f"ts_report_csv_{module.name}",
+                label=f"Download {module.code} CSV",
+            )
+
+    payload = ReportPayload(
+        title="Test Suite Module Report",
+        summary={
+            "modules": len(reports),
+            "suites": sum(r.suite_count for r in reports),
+            "passed": sum(r.passed for r in reports),
+            "failed": sum(r.failed for r in reports),
+        },
+        sections=tuple(ReportSection(r.module.value, r.table) for r in reports),
+    )
+    st.caption("Combined report — all modules above")
+    render_export_buttons(container.reporting_service, payload, key_prefix="ts_module_report")
+
+
 def render(container: ServiceContainer) -> None:
     st.header("Test Suites")
     st.caption(
@@ -104,6 +148,8 @@ def render(container: ServiceContainer) -> None:
     )
     st.dataframe(table, use_container_width=True, hide_index=True)
 
+    _render_module_reports(container, project_id)
+
     st.subheader("Run a Test Suite")
     selected_name = st.selectbox("Test Suite", [s.name for s in suites], key="ts_selected_suite")
     suite = next(s for s in suites if s.name == selected_name)
@@ -124,7 +170,7 @@ def render(container: ServiceContainer) -> None:
                 outcome.status, outcome.run.runtime_seconds if outcome.run else None
             )
             if outcome.run:
-                st.json(outcome.run.summary)
+                render_summary_table(outcome.run.summary)
 
     if col2.button("🗑 Delete Test Suite", key="ts_delete"):
         container.test_suite_service.delete_suite(suite.suite_id)

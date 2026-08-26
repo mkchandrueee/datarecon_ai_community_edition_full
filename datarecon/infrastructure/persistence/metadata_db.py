@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS validation_runs (
     runtime_seconds         REAL NOT NULL DEFAULT 0,
     project_id              TEXT NOT NULL DEFAULT 'default',
     suite_id                TEXT,
+    archived                INTEGER NOT NULL DEFAULT 0,
     started_at              TEXT NOT NULL,
     finished_at             TEXT NOT NULL
 );
@@ -126,6 +127,13 @@ class MetadataDatabase:
             self._connection.commit()
         if "suite_id" not in columns:
             self._connection.execute("ALTER TABLE validation_runs ADD COLUMN suite_id TEXT")
+            self._connection.commit()
+        if "archived" not in columns:
+            # Existing rows default to not-archived, so an upgrade never hides
+            # history that was previously visible.
+            self._connection.execute(
+                "ALTER TABLE validation_runs ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"
+            )
             self._connection.commit()
         # Column is guaranteed to exist at this point (either from CREATE TABLE
         # on a fresh DB, or from the ALTER TABLE just above on an older one).

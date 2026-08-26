@@ -25,16 +25,35 @@ class DashboardWidgets:
     pass_rate_percent: float
 
 
+@dataclass(frozen=True)
+class ProjectReport:
+    """A project's dashboard state, shaped for Module 18's exporters."""
+
+    project_name: str
+    summary: dict[str, object]
+    runs_by_module: pd.DataFrame
+    pass_rate_trend: pd.DataFrame
+    run_history: pd.DataFrame
+
+    def sections(self) -> list[tuple[str, pd.DataFrame]]:
+        """Named tables in reading order; empty ones are dropped so an export
+        never carries a blank sheet."""
+        candidates = [
+            ("Runs by Module", self.runs_by_module),
+            ("Pass Rate Trend", self.pass_rate_trend),
+            ("Run History", self.run_history),
+        ]
+        return [(title, table) for title, table in candidates if not table.empty]
+
+
 class DashboardService:
     def __init__(self, run_repository: IValidationRunRepository):
         self._runs = run_repository
 
     def _fetch(self, limit: int, project_id: str | None) -> list[ValidationRun]:
-        return (
-            self._runs.list_by_project(project_id, limit)
-            if project_id
-            else self._runs.list_recent(limit)
-        )
+        # Archived runs are deliberately excluded: a superseded failure the
+        # user archived shouldn't keep dragging the pass rate down.
+        return self._runs.list_filtered(project_id=project_id, limit=limit)
 
     def widgets(self, limit: int = _DEFAULT_LIMIT, project_id: str | None = None) -> DashboardWidgets:
         return self._summarize(self._fetch(limit, project_id))
@@ -83,6 +102,50 @@ class DashboardService:
         ).reset_index()
         grouped["total"] = grouped["passed"] + grouped["failed"] + grouped["errored"]
         return grouped[columns].sort_values("total", ascending=False).reset_index(drop=True)
+
+    def run_history(
+        self, limit: int = _DEFAULT_LIMIT, project_id: str | None = None
+    ) -> pd.DataFrame:
+        """Flat run list backing the project report's detail section."""
+        runs = self._fetch(limit, project_id)
+        columns = ["started_at", "module", "name", "status", "runtime_seconds", "error_message"]
+        if not runs:
+            return pd.DataFrame(columns=columns)
+        df = pd.DataFrame(
+            [
+                {
+                    "started_at": r.started_at,
+                    "module": r.module.value,
+                    "name": r.name,
+                    "status": r.status.value,
+                    "runtime_seconds": r.runtime_seconds,
+                    "error_message": r.error_message or "",
+                }
+                for r in runs
+            ]
+        )
+        return df.sort_values("started_at", ascending=False).reset_index(drop=True)[columns]
+
+    def project_report(
+        self, project_name: str, limit: int = _DEFAULT_LIMIT, project_id: str | None = None
+    ) -> ProjectReport:
+        """Everything the dashboard shows, packaged for export in one call, so
+        the PDF/Excel/CSV a reviewer receives matches the screen they saw."""
+        widgets = self.widgets(limit, project_id)
+        return ProjectReport(
+            project_name=project_name,
+            summary={
+                "project": project_name,
+                "total_runs": widgets.total_runs,
+                "passed": widgets.passed,
+                "failed": widgets.failed,
+                "errored": widgets.errored,
+                "pass_rate_percent": widgets.pass_rate_percent,
+            },
+            runs_by_module=self.runs_by_module(limit, project_id),
+            pass_rate_trend=self.pass_rate_trend(limit, project_id),
+            run_history=self.run_history(limit, project_id),
+        )
 
     def runtime_trend(
         self, limit: int = _DEFAULT_LIMIT, project_id: str | None = None

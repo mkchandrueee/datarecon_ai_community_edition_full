@@ -58,6 +58,22 @@ class TestSuiteError(ValueError):
     """Raised for malformed test-suite requests."""
 
 
+def prefixed_name(module: ValidationModule, name: str) -> str:
+    """Stamp the module's short code onto a suite name (RC_CUSTOMER_MASTER).
+
+    Suites from different modules often describe the same table, so the bare
+    name alone doesn't say what was validated; the prefix makes the module
+    readable in suite lists and lets reports group by it. Idempotent — a name
+    that already carries the right prefix (in any case) is returned unchanged,
+    so re-saving never produces RC_RC_CUSTOMER_MASTER.
+    """
+    name = name.strip()
+    prefix = f"{module.code}_"
+    if name.casefold().startswith(prefix.casefold()):
+        return prefix + name[len(prefix) :]
+    return prefix + name
+
+
 @dataclass
 class TestSuiteRunOutcome:
     suite: TestSuite
@@ -119,7 +135,7 @@ class TestSuiteService:
             raise TestSuiteError(f"Project '{project_id}' not found.")
         suite = TestSuite(
             project_id=project_id,
-            name=name,
+            name=prefixed_name(module, name),
             module=module,
             config=config,
             description=description,

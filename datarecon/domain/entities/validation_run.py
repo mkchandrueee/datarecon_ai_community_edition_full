@@ -31,6 +31,10 @@ class ValidationRun:
     runtime_seconds: float = 0.0
     project_id: str = DEFAULT_PROJECT_ID
     suite_id: str | None = None  # set only when triggered by TestSuiteService.run_suite()
+    #: Archived runs stay in history but drop out of Reports/Dashboard by
+    #: default, so a superseded failure stops skewing the current picture.
+    #: Archiving is always a deliberate act — nothing archives itself.
+    archived: bool = False
 
     run_id: str = field(default_factory=lambda: uuid4().hex)
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))

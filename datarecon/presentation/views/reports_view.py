@@ -1,6 +1,7 @@
 # datarecon/presentation/views/reports_view.py — Module 18: Run history browser
 #
-# Summary metrics always come from the SQLite metadata store (ADR-0004).
+# Summary metrics always come from the SQLite metadata store (ADR-0004) and
+# render as a Metric/Value table rather than raw JSON.
 # Row-level detail — when it was retained at execute() time — comes from the
 # separate Parquet-backed RunDetailStore (ADR-0008); older runs recorded
 # before that store existed (or modules that never produce a DataFrame,
@@ -17,6 +18,7 @@ from datarecon.presentation.components.report_export import (
     render_csv_download_button,
     render_export_buttons,
 )
+from datarecon.presentation.components.summary_table import render_summary_table
 from datarecon.presentation.container import ServiceContainer
 
 _MODULE_FILTER_ALL = "All Modules"
@@ -44,6 +46,12 @@ def render(container: ServiceContainer) -> None:
             "Test Suite", suite_names, key="reports_suite_filter"
         )
     limit = st.slider("Rows to show", 10, 500, 100, key="reports_limit")
+    include_archived = st.checkbox(
+        "Include archived runs",
+        value=False,
+        key="reports_include_archived",
+        help="Archived runs stay in history but are hidden here by default.",
+    )
 
     project_id = None
     if selected_project_name != _ALL_PROJECTS:
@@ -54,11 +62,15 @@ def render(container: ServiceContainer) -> None:
         suite_id = next(s.suite_id for s in suites if s.name == selected_suite_name)
 
     runs = container.run_repository.list_filtered(
-        project_id=project_id, module=module, suite_id=suite_id, limit=limit
+        project_id=project_id,
+        module=module,
+        suite_id=suite_id,
+        limit=limit,
+        include_archived=include_archived,
     )
 
     if not runs:
-        st.info("No validation runs recorded yet.")
+        st.info("No validation runs match these filters.")
         return
 
     project_name_by_id = {p.project_id: p.name for p in projects}
@@ -74,6 +86,7 @@ def render(container: ServiceContainer) -> None:
                 "status": r.status.value,
                 "started_at": r.started_at,
                 "runtime_seconds": r.runtime_seconds,
+                "archived": "Yes" if r.archived else "",
                 "error_message": r.error_message or "",
             }
             for r in runs
@@ -92,7 +105,22 @@ def render(container: ServiceContainer) -> None:
         "Inspect a run", [r.run_id for r in runs], key="reports_selected_run"
     )
     run = next(r for r in runs if r.run_id == selected_run_id)
-    st.json(run.summary)
+
+    # Archiving is manual and reversible: a superseded failure can be taken out
+    # of the default view once it's been re-run and fixed, without losing it.
+    if run.archived:
+        st.info("This run is archived — it's hidden from the default view.")
+        if st.button("Restore run", key="reports_unarchive"):
+            container.run_repository.set_archived(run.run_id, False)
+            st.rerun()
+    elif st.button("Archive run", key="reports_archive"):
+        container.run_repository.set_archived(run.run_id, True)
+        st.rerun()
+
+    st.subheader("Summary")
+    render_summary_table(run.summary)
+    if run.error_message:
+        st.error(run.error_message)
 
     st.subheader("Row-level detail")
     detail_sections = container.detail_store.load_all(run.run_id)

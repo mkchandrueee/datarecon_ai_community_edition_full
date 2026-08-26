@@ -40,10 +40,10 @@ def render_export_buttons(
 def render_csv_download_button(
     reporting: ReportingService, title: str, df: pd.DataFrame, key: str, label: str = "Download CSV"
 ) -> None:
-    """Single-table CSV download for one drill-down tab (e.g. the mismatch grid)."""
-    if df.empty:
-        st.caption("Nothing to download — no rows in this view.")
-        return
+    """Single-table CSV download for one drill-down tab (e.g. the mismatch grid).
+
+    An empty frame still downloads: its header-only CSV states a real result
+    ("no mismatches"), so the button stays live instead of disappearing."""
     payload = ReportPayload(title=title, summary={}, sections=(ReportSection(title, df),))
     data = reporting.export(payload, ReportFormat.CSV)
     st.download_button(

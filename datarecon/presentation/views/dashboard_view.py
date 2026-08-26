@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import streamlit as st
 
+from datarecon.application.services.reporting_service import ReportPayload, ReportSection
+from datarecon.presentation.components.report_export import render_export_buttons
 from datarecon.presentation.container import ServiceContainer
 
 _ALL_PROJECTS = "All Projects"
@@ -48,3 +50,17 @@ def render(container: ServiceContainer) -> None:
         runtime = container.dashboard_service.runtime_trend(project_id=project_id)
         if not runtime.empty:
             st.line_chart(runtime.set_index("started_at")["runtime_seconds"])
+
+    st.divider()
+    st.subheader("Project Report")
+    st.caption(
+        "Overall results for the selected project — the same figures shown above, "
+        "as a downloadable report."
+    )
+    report = container.dashboard_service.project_report(selected_name, project_id=project_id)
+    payload = ReportPayload(
+        title=f"Project Report - {selected_name}",
+        summary=report.summary,
+        sections=tuple(ReportSection(title, table) for title, table in report.sections()),
+    )
+    render_export_buttons(container.reporting_service, payload, key_prefix="dash_project_report")

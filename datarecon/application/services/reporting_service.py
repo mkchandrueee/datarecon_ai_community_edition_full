@@ -27,6 +27,15 @@ class ReportingError(ValueError):
     """Raised for malformed or unsupported report requests."""
 
 
+def _drop_tz(value: Any) -> Any:
+    tzinfo = getattr(value, "tzinfo", None)
+    return value.replace(tzinfo=None) if tzinfo is not None else value
+
+
+def _has_tz_aware_value(series: pd.Series) -> bool:
+    return any(getattr(v, "tzinfo", None) is not None for v in series)
+
+
 @dataclass(frozen=True)
 class ReportSection:
     title: str
@@ -42,6 +51,8 @@ class ReportPayload:
 
 
 class ReportingService:
+    _SUMMARY_TITLE = "Summary"
+
     def export(self, payload: ReportPayload, fmt: ReportFormat) -> bytes:
         if fmt == ReportFormat.EXCEL:
             return self._to_excel(payload)
@@ -70,15 +81,41 @@ class ReportingService:
     def _to_excel(self, payload: ReportPayload) -> bytes:
         buf = BytesIO()
         with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
-            summary_df = pd.DataFrame(
-                {"metric": list(payload.summary.keys()), "value": list(payload.summary.values())}
+            self._excel_safe(self._summary_frame(payload)).to_excel(
+                writer, sheet_name=self._SUMMARY_TITLE, index=False
             )
-            summary_df.to_excel(writer, sheet_name="Summary", index=False)
-            used_names: set[str] = {"Summary"}
+            used_names: set[str] = {self._SUMMARY_TITLE}
             for section in payload.sections:
                 sheet_name = self._unique_sheet_name(section.title, used_names)
-                section.dataframe.to_excel(writer, sheet_name=sheet_name, index=False)
+                self._excel_safe(section.dataframe).to_excel(
+                    writer, sheet_name=sheet_name, index=False
+                )
         return buf.getvalue()
+
+    @staticmethod
+    def _excel_safe(df: pd.DataFrame) -> pd.DataFrame:
+        """Drop timezones from datetime columns.
+
+        Run timestamps are stored tz-aware (UTC), but the xlsx format has no
+        tz-aware datetime type and xlsxwriter raises rather than guessing.
+        The instants are already UTC, so dropping the offset loses nothing a
+        reader of the sheet would miss.
+        """
+        out = df
+        for column in df.columns:
+            series = df[column]
+            if isinstance(series.dtype, pd.DatetimeTZDtype):
+                converted = series.dt.tz_localize(None)
+            elif series.dtype == object and _has_tz_aware_value(series):
+                # A column of datetimes mixed with None stays object-dtype, so
+                # the .dt accessor isn't available — strip per value instead.
+                converted = series.map(_drop_tz)
+            else:
+                continue
+            if out is df:
+                out = df.copy()
+            out[column] = converted
+        return out
 
     @staticmethod
     def _unique_sheet_name(title: str, used: set[str]) -> str:
@@ -92,12 +129,26 @@ class ReportingService:
         return name
 
     def _to_csv(self, payload: ReportPayload) -> bytes:
-        if len(payload.sections) != 1:
-            raise ReportingError(
-                f"CSV export requires exactly one data section, got {len(payload.sections)}. "
-                "Use Excel or JSON for multi-section reports."
-            )
-        return payload.sections[0].dataframe.to_csv(index=False).encode("utf-8")
+        """CSV for any payload shape. CSV is a single flat table, so a report
+        with no data sections falls back to its summary metrics, and one with
+        several stacks them under `# <section title>` banner lines — every
+        module offers a working CSV download rather than a dead 'n/a' button."""
+        if len(payload.sections) == 1:
+            return payload.sections[0].dataframe.to_csv(index=False).encode("utf-8")
+        if not payload.sections:
+            return self._summary_frame(payload).to_csv(index=False).encode("utf-8")
+
+        blocks = [f"# {self._SUMMARY_TITLE}", self._summary_frame(payload).to_csv(index=False)]
+        for section in payload.sections:
+            blocks.append(f"# {section.title}")
+            blocks.append(section.dataframe.to_csv(index=False))
+        return "\n".join(blocks).encode("utf-8")
+
+    @staticmethod
+    def _summary_frame(payload: ReportPayload) -> pd.DataFrame:
+        return pd.DataFrame(
+            {"metric": list(payload.summary.keys()), "value": list(payload.summary.values())}
+        )
 
     def _to_json(self, payload: ReportPayload) -> bytes:
         doc = {

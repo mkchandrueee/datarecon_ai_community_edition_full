@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 import pandas as pd
@@ -85,6 +85,11 @@ class ComparisonConfig:
     float_tolerance: float = 0.0
     #: Drop duplicate-key rows (keep first) instead of raising.
     drop_duplicate_keys: bool = False
+    #: Match column and business-key *names* case-insensitively, so a source
+    #: CUSTOMER_ID lines up with a target customer_id. Source spelling wins as
+    #: the canonical name in the output. This is about identifying columns, not
+    #: comparing their values — `ignore_case` governs the values.
+    case_insensitive_columns: bool = True
     #: Chunk size for the cell-level mismatch diff (memory guard, Module 32).
     diff_chunk_size: int = 500_000
 
@@ -139,6 +144,7 @@ class ComparisonEngine:
     # ------------------------------------------------------------------ #
     def compare(self, source: pd.DataFrame, target: pd.DataFrame) -> ComparisonResult:
         """Execute the full comparison and return a ComparisonResult."""
+        source, target = self._align_column_case(source, target)
         src = self._prepare(source, side="source")
         tgt = self._prepare(target, side="target")
 
@@ -204,6 +210,40 @@ class ComparisonEngine:
     # ------------------------------------------------------------------ #
     # Preparation & validation
     # ------------------------------------------------------------------ #
+    def _align_column_case(
+        self, source: pd.DataFrame, target: pd.DataFrame
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Reconcile column names that differ only by case.
+
+        Databases disagree on identifier casing (Oracle upper-cases, Postgres
+        lower-cases, others preserve), so the same logical column arrives as
+        CUSTOMER_ID on one side and customer_id on the other. Source spelling
+        is canonical: target columns are renamed to it, and the configured
+        business keys / compare columns are resolved against it too, so a key
+        typed in either case still matches.
+        """
+        if not self.config.case_insensitive_columns or source is None or target is None:
+            return source, target
+
+        canonical = {str(c).casefold(): str(c) for c in source.columns}
+        renames = {
+            c: canonical[str(c).casefold()]
+            for c in target.columns
+            if str(c).casefold() in canonical and str(c) != canonical[str(c).casefold()]
+        }
+        if renames:
+            target = target.rename(columns=renames)
+
+        self.business_keys = [canonical.get(str(k).casefold(), k) for k in self.business_keys]
+        if self.config.compare_columns is not None:
+            self.config = replace(
+                self.config,
+                compare_columns=[
+                    canonical.get(str(c).casefold(), c) for c in self.config.compare_columns
+                ],
+            )
+        return source, target
+
     def _prepare(self, df: pd.DataFrame, side: str) -> pd.DataFrame:
         if df is None:
             raise SchemaAlignmentError(f"{side} DataFrame is None.")

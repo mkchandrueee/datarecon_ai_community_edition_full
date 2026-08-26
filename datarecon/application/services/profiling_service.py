@@ -17,6 +17,7 @@ import pandas as pd
 
 from datarecon.application.services.data_extraction_service import DataExtractionService
 from datarecon.application.services.run_recording import record_run
+from datarecon.core.column_matching import resolve_all
 from datarecon.core.engine.duckdb_engine import (
     duckdb_connection,
     query_df,
@@ -76,10 +77,14 @@ class ProfilingService:
             df = self._extraction.extract_dataframe(
                 request.connection_id, query=request.query, table=request.table
             )
-            columns = list(request.columns) or list(df.columns)
-            missing = [c for c in columns if c not in df.columns]
-            if missing:
-                raise ProfilingError(f"Column(s) not found: {missing}")
+            requested = list(request.columns)
+            if requested:
+                # Resolve case-insensitively (ADR-0009).
+                columns, missing = resolve_all(requested, df.columns)
+                if missing:
+                    raise ProfilingError(f"Column(s) not found: {missing}")
+            else:
+                columns = list(df.columns)
 
             total_rows = len(df)
             profiles = pd.DataFrame([self._profile_column(df, col, total_rows) for col in columns])

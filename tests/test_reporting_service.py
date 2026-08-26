@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 
 import pandas as pd
 import pytest
@@ -50,23 +51,40 @@ def test_csv_export_single_section(service: ReportingService, payload: ReportPay
     assert "east,-3" in text
 
 
-def test_csv_export_rejects_multi_section(service: ReportingService) -> None:
+def test_csv_export_stacks_multiple_sections_under_banners(service: ReportingService) -> None:
     payload = ReportPayload(
         title="x",
-        summary={},
+        summary={"rows": 3},
         sections=(
             ReportSection("A", pd.DataFrame({"a": [1]})),
             ReportSection("B", pd.DataFrame({"b": [2]})),
         ),
     )
-    with pytest.raises(ReportingError, match="exactly one"):
-        service.export(payload, ReportFormat.CSV)
+    text = service.export(payload, ReportFormat.CSV).decode("utf-8")
+    assert "# Summary" in text
+    assert "rows,3" in text
+    assert "# A" in text
+    assert "a\n1" in text
+    assert "# B" in text
+    assert "b\n2" in text
 
 
-def test_csv_export_rejects_zero_sections(service: ReportingService) -> None:
-    payload = ReportPayload(title="x", summary={"a": 1})
-    with pytest.raises(ReportingError, match="exactly one"):
-        service.export(payload, ReportFormat.CSV)
+def test_csv_export_falls_back_to_summary_when_no_sections(service: ReportingService) -> None:
+    payload = ReportPayload(title="x", summary={"source_count": 10, "target_count": 10})
+    text = service.export(payload, ReportFormat.CSV).decode("utf-8")
+    assert "metric,value" in text
+    assert "source_count,10" in text
+    assert "target_count,10" in text
+
+
+def test_csv_export_of_empty_section_still_emits_header(service: ReportingService) -> None:
+    payload = ReportPayload(
+        title="x",
+        summary={},
+        sections=(ReportSection("Mismatches", pd.DataFrame(columns=["id", "email"])),),
+    )
+    text = service.export(payload, ReportFormat.CSV).decode("utf-8")
+    assert "id,email" in text
 
 
 def test_excel_export_produces_nonempty_workbook(
@@ -98,7 +116,54 @@ def test_pdf_export_handles_empty_sections(service: ReportingService) -> None:
     assert raw[:4] == b"%PDF"
 
 
+def test_unsupported_format_raises(service: ReportingService, payload: ReportPayload) -> None:
+    with pytest.raises(ReportingError, match="Unsupported report format"):
+        service.export(payload, "xml")  # type: ignore[arg-type]
+
+
 def test_content_type_and_extension_mapping(service: ReportingService) -> None:
     assert service.file_extension(ReportFormat.EXCEL) == "xlsx"
     assert service.file_extension(ReportFormat.CSV) == "csv"
     assert service.content_type(ReportFormat.JSON) == "application/json"
+
+
+# ---------- Excel and timezone-aware timestamps ----------
+
+
+def test_excel_export_handles_tz_aware_datetime_column(service: ReportingService) -> None:
+    """xlsx has no tz-aware datetime type; xlsxwriter raises rather than guess."""
+    table = pd.DataFrame(
+        {"run": ["a", "b"], "started_at": pd.to_datetime(["2026-01-01", "2026-01-02"], utc=True)}
+    )
+    payload = ReportPayload(title="x", summary={}, sections=(ReportSection("Runs", table),))
+
+    raw = service.export(payload, ReportFormat.EXCEL)
+
+    assert raw[:2] == b"PK"
+
+
+def test_excel_export_handles_object_column_of_tz_aware_values(
+    service: ReportingService,
+) -> None:
+    """Datetimes mixed with None stay object-dtype, so .dt is unavailable."""
+    table = pd.DataFrame(
+        {"suite": ["a", "b"], "last_run": [datetime(2026, 1, 1, tzinfo=UTC), None]}
+    )
+    payload = ReportPayload(title="x", summary={}, sections=(ReportSection("Suites", table),))
+
+    raw = service.export(payload, ReportFormat.EXCEL)
+
+    assert raw[:2] == b"PK"
+
+
+def test_excel_export_handles_tz_aware_value_in_summary(service: ReportingService) -> None:
+    payload = ReportPayload(title="x", summary={"generated": datetime(2026, 1, 1, tzinfo=UTC)})
+
+    raw = service.export(payload, ReportFormat.EXCEL)
+
+    assert raw[:2] == b"PK"
+
+
+def test_excel_safe_leaves_naive_frames_untouched(service: ReportingService) -> None:
+    table = pd.DataFrame({"a": [1], "when": pd.to_datetime(["2026-01-01"])})
+    assert service._excel_safe(table) is table
