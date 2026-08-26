@@ -52,18 +52,18 @@ def frames() -> dict[str, pd.DataFrame]:
 
 @pytest.fixture
 def service(
-    run_repository, test_suite_repository, project_repository, frames
+    run_repository, test_suite_repository, project_repository, detail_store, frames
 ) -> TestSuiteService:
     extraction = FakeExtractionService(frames)
     return TestSuiteService(
         test_suite_repository,
         project_repository,
-        SchemaValidationService(extraction, run_repository),
-        RecordCountService(extraction, run_repository),
-        DuplicateValidationService(extraction, run_repository),
-        NullabilityValidationService(extraction, run_repository),
-        AggregationValidationService(extraction, run_repository),
-        FullDataValidationService(extraction, run_repository),
+        SchemaValidationService(extraction, run_repository, detail_store),
+        RecordCountService(extraction, run_repository, detail_store),
+        DuplicateValidationService(extraction, run_repository, detail_store),
+        NullabilityValidationService(extraction, run_repository, detail_store),
+        AggregationValidationService(extraction, run_repository, detail_store),
+        FullDataValidationService(extraction, run_repository, detail_store),
     )
 
 

@@ -20,6 +20,7 @@ from datarecon.domain.entities.project import DEFAULT_PROJECT_ID
 from datarecon.domain.entities.validation_run import ValidationRun
 from datarecon.domain.enums import RunStatus, ValidationModule
 from datarecon.domain.interfaces.validation_run_repository import IValidationRunRepository
+from datarecon.infrastructure.persistence.run_detail_store import RunDetailStore
 
 _DEFAULT_SENTINELS: tuple[str, ...] = ("N/A", "NA", "NULL", "None", "-", "-999", "1900-01-01")
 
@@ -49,9 +50,15 @@ class NullabilityValidationResult:
 
 
 class NullabilityValidationService:
-    def __init__(self, extraction: DataExtractionService, run_repository: IValidationRunRepository):
+    def __init__(
+        self,
+        extraction: DataExtractionService,
+        run_repository: IValidationRunRepository,
+        detail_store: RunDetailStore,
+    ):
         self._extraction = extraction
         self._runs = run_repository
+        self._details = detail_store
 
     def execute(
         self,
@@ -92,6 +99,7 @@ class NullabilityValidationService:
                 project_id=project_id,
                 suite_id=suite_id,
             )
+            self._details.save(run.run_id, {"Column Statistics": column_stats})
             return NullabilityValidationResult(
                 total_rows, completeness_score, status, column_stats, run
             )

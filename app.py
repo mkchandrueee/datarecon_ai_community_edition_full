@@ -25,6 +25,7 @@ from datarecon.application.services.test_suite_service import TestSuiteService
 from datarecon.infrastructure.connectors.engine_factory import EngineFactory
 from datarecon.infrastructure.extraction.data_extractor import DataExtractor
 from datarecon.infrastructure.persistence.metadata_db import MetadataDatabase
+from datarecon.infrastructure.persistence.run_detail_store import RunDetailStore
 from datarecon.infrastructure.persistence.sqlite_connection_repository import (
     SQLiteConnectionRepository,
 )
@@ -84,15 +85,20 @@ def build_container() -> ServiceContainer:
     test_suite_repository = SQLiteTestSuiteRepository(metadata_db)
     engine_factory = EngineFactory()
     extractor = DataExtractor(engine_factory)
+    detail_store = RunDetailStore(settings.run_detail_dir)
 
     # 2. Initialize Services
     extraction_service = DataExtractionService(connection_repository, cipher, extractor)
-    schema_service = SchemaValidationService(extraction_service, run_repository)
-    record_count_service = RecordCountService(extraction_service, run_repository)
-    duplicate_service = DuplicateValidationService(extraction_service, run_repository)
-    nullability_service = NullabilityValidationService(extraction_service, run_repository)
-    aggregation_service = AggregationValidationService(extraction_service, run_repository)
-    full_data_service = FullDataValidationService(extraction_service, run_repository)
+    schema_service = SchemaValidationService(extraction_service, run_repository, detail_store)
+    record_count_service = RecordCountService(extraction_service, run_repository, detail_store)
+    duplicate_service = DuplicateValidationService(extraction_service, run_repository, detail_store)
+    nullability_service = NullabilityValidationService(
+        extraction_service, run_repository, detail_store
+    )
+    aggregation_service = AggregationValidationService(
+        extraction_service, run_repository, detail_store
+    )
+    full_data_service = FullDataValidationService(extraction_service, run_repository, detail_store)
 
     return ServiceContainer(
         connection_service=ConnectionService(connection_repository, cipher, engine_factory),
@@ -103,7 +109,7 @@ def build_container() -> ServiceContainer:
         nullability_service=nullability_service,
         aggregation_service=aggregation_service,
         full_data_service=full_data_service,
-        profiling_service=ProfilingService(extraction_service, run_repository),
+        profiling_service=ProfilingService(extraction_service, run_repository, detail_store),
         file_checksum_service=FileChecksumService(connection_repository, run_repository),
         reporting_service=ReportingService(),
         dashboard_service=DashboardService(run_repository),
@@ -119,6 +125,7 @@ def build_container() -> ServiceContainer:
             full_data_service,
         ),
         run_repository=run_repository,
+        detail_store=detail_store,
     )
 
 

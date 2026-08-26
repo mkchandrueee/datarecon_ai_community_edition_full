@@ -15,7 +15,7 @@ from tests.conftest import FakeExtractionService
 
 
 @pytest.fixture
-def service(run_repository) -> NullabilityValidationService:
+def service(run_repository, detail_store) -> NullabilityValidationService:
     frames = {
         "clean": pd.DataFrame({"id": [1, 2, 3, 4], "name": ["a", "b", "c", "d"]}),
         "messy": pd.DataFrame(
@@ -37,7 +37,7 @@ def service(run_repository) -> NullabilityValidationService:
         ),
         "empty": pd.DataFrame({"id": [], "name": []}),
     }
-    return NullabilityValidationService(FakeExtractionService(frames), run_repository)
+    return NullabilityValidationService(FakeExtractionService(frames), run_repository, detail_store)
 
 
 def test_fully_complete_data_passes(service: NullabilityValidationService) -> None:
@@ -102,3 +102,14 @@ def test_persists_run_history(service: NullabilityValidationService, run_reposit
     fetched = run_repository.get_by_id(result.run.run_id)
     assert fetched is not None
     assert fetched.summary["completeness_score"] == 100.0
+
+
+def test_persists_column_statistics_detail(
+    service: NullabilityValidationService, detail_store
+) -> None:
+    result = service.execute(NullabilityValidationRequest(connection_id="clean"))
+    sections = detail_store.load_all(result.run.run_id)
+    assert set(sections) == {"Column Statistics"}
+    pd.testing.assert_frame_equal(
+        sections["Column Statistics"], result.column_stats, check_dtype=False
+    )

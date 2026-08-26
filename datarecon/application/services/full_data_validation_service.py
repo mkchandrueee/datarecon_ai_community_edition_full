@@ -15,6 +15,7 @@ from datarecon.domain.entities.project import DEFAULT_PROJECT_ID
 from datarecon.domain.entities.validation_run import ValidationRun
 from datarecon.domain.enums import RunStatus, ValidationModule
 from datarecon.domain.interfaces.validation_run_repository import IValidationRunRepository
+from datarecon.infrastructure.persistence.run_detail_store import RunDetailStore
 
 
 @dataclass(frozen=True)
@@ -38,10 +39,14 @@ class FullValidationOutcome:
 
 class FullDataValidationService:
     def __init__(
-        self, extraction_service: DataExtractionService, run_repository: IValidationRunRepository
+        self,
+        extraction_service: DataExtractionService,
+        run_repository: IValidationRunRepository,
+        detail_store: RunDetailStore,
     ):
         self._extraction = extraction_service
         self._runs = run_repository
+        self._details = detail_store
 
     def execute(
         self,
@@ -84,6 +89,15 @@ class FullDataValidationService:
                 summary=result.summary,
                 project_id=project_id,
                 suite_id=suite_id,
+            )
+            self._details.save(
+                run.run_id,
+                {
+                    "Mismatches": result.mismatch,
+                    "Missing in Target": result.missing_in_target,
+                    "Extra in Target": result.extra_in_target,
+                    "Matched": result.exact_match,
+                },
             )
             return FullValidationOutcome(result, run)
         except Exception as exc:

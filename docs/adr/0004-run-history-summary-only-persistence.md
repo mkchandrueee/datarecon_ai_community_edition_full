@@ -36,3 +36,11 @@ at the result in the same session.
   file" capability in Community Edition. This is an explicit, recorded
   scope cut, not an oversight; Enterprise Module 34's object-storage tier
   is the intended home for that capability.
+
+**Update (ADR-0008):** the "no row-level detail" cut above was
+specifically about the *SQLite metadata store* staying summary-only, not
+about detail being unrecoverable altogether. ADR-0008 adds a separate,
+Parquet-backed `RunDetailStore` alongside (not instead of) this table, so
+Reports can now replay a past run's rows without the `validation_runs`
+table itself growing unbounded — the decision above still holds exactly
+as written for `record_run()`/`validation_runs`.

@@ -10,6 +10,7 @@ import pytest
 
 from datarecon.domain.entities.column_catalog_metadata import ColumnCatalogMetadata
 from datarecon.infrastructure.persistence.metadata_db import MetadataDatabase
+from datarecon.infrastructure.persistence.run_detail_store import RunDetailStore
 from datarecon.infrastructure.persistence.sqlite_project_repository import (
     SQLiteProjectRepository,
 )
@@ -62,3 +63,8 @@ def project_repository(metadata_db: MetadataDatabase) -> SQLiteProjectRepository
 @pytest.fixture
 def test_suite_repository(metadata_db: MetadataDatabase) -> SQLiteTestSuiteRepository:
     return SQLiteTestSuiteRepository(metadata_db)
+
+
+@pytest.fixture
+def detail_store(tmp_path: Path) -> RunDetailStore:
+    return RunDetailStore(tmp_path / "run_details")

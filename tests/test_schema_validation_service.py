@@ -15,7 +15,7 @@ from tests.conftest import FakeExtractionService
 
 
 @pytest.fixture
-def service(run_repository) -> SchemaValidationService:
+def service(run_repository, detail_store) -> SchemaValidationService:
     frames = {
         "src": pd.DataFrame({"id": [1, 2], "name": ["a", "b"], "amount": [1.0, 2.0]}),
         "tgt_identical": pd.DataFrame({"id": [1, 2], "name": ["a", "b"], "amount": [1.0, 2.0]}),
@@ -28,7 +28,7 @@ def service(run_repository) -> SchemaValidationService:
         ),
         "tgt_reordered": pd.DataFrame({"name": ["a", "b"], "id": [1, 2], "amount": [1.0, 2.0]}),
     }
-    return SchemaValidationService(FakeExtractionService(frames), run_repository)
+    return SchemaValidationService(FakeExtractionService(frames), run_repository, detail_store)
 
 
 def test_identical_schema_passes(service: SchemaValidationService) -> None:
@@ -90,19 +90,34 @@ def test_persists_run_history(service: SchemaValidationService, run_repository) 
     assert fetched.summary["mismatches"] == 1
 
 
+def test_persists_row_level_detail(
+    service: SchemaValidationService, detail_store, run_repository
+) -> None:
+    result = service.execute(
+        SchemaValidationRequest(source_connection_id="src", target_connection_id="tgt_missing_col")
+    )
+    sections = detail_store.load_all(result.run.run_id)
+    assert set(sections) == {"Column Comparison"}
+    pd.testing.assert_frame_equal(
+        sections["Column Comparison"], result.comparison, check_dtype=False
+    )
+
+
 # ---------- catalog metadata enrichment (length/key/default, ADR-0007) ----------
 
 
-def _catalog_service(run_repository, catalogs) -> SchemaValidationService:
+def _catalog_service(run_repository, detail_store, catalogs) -> SchemaValidationService:
     frames = {
         "src": pd.DataFrame({"id": [1, 2], "name": ["a", "b"]}),
         "tgt": pd.DataFrame({"id": [1, 2], "name": ["a", "b"]}),
     }
-    return SchemaValidationService(FakeExtractionService(frames, catalogs), run_repository)
+    return SchemaValidationService(
+        FakeExtractionService(frames, catalogs), run_repository, detail_store
+    )
 
 
-def test_catalog_not_fetched_without_table_name(run_repository) -> None:
-    service = _catalog_service(run_repository, catalogs={})
+def test_catalog_not_fetched_without_table_name(run_repository, detail_store) -> None:
+    service = _catalog_service(run_repository, detail_store, catalogs={})
     result = service.execute(
         SchemaValidationRequest(source_connection_id="src", target_connection_id="tgt")
     )
@@ -110,7 +125,7 @@ def test_catalog_not_fetched_without_table_name(run_repository) -> None:
     assert result.run.summary["attribute_mismatches"] == 0
 
 
-def test_matching_catalog_attributes_pass(run_repository) -> None:
+def test_matching_catalog_attributes_pass(run_repository, detail_store) -> None:
     catalogs = {
         "src:customers": [
             ColumnCatalogMetadata("id", "INTEGER", None, False, None, True),
@@ -121,7 +136,7 @@ def test_matching_catalog_attributes_pass(run_repository) -> None:
             ColumnCatalogMetadata("name", "VARCHAR(50)", 50, True, None, False),
         ],
     }
-    service = _catalog_service(run_repository, catalogs)
+    service = _catalog_service(run_repository, detail_store, catalogs)
     result = service.execute(
         SchemaValidationRequest(
             source_connection_id="src",
@@ -138,12 +153,12 @@ def test_matching_catalog_attributes_pass(run_repository) -> None:
     assert bool(row["default_match"]) is True
 
 
-def test_length_mismatch_fails(run_repository) -> None:
+def test_length_mismatch_fails(run_repository, detail_store) -> None:
     catalogs = {
         "src:customers": [ColumnCatalogMetadata("name", "VARCHAR(50)", 50, True, None, False)],
         "tgt:customers": [ColumnCatalogMetadata("name", "VARCHAR(20)", 20, True, None, False)],
     }
-    service = _catalog_service(run_repository, catalogs)
+    service = _catalog_service(run_repository, detail_store, catalogs)
     result = service.execute(
         SchemaValidationRequest(
             source_connection_id="src",
@@ -160,12 +175,12 @@ def test_length_mismatch_fails(run_repository) -> None:
     assert row["target_length"] == 20
 
 
-def test_key_column_mismatch_fails(run_repository) -> None:
+def test_key_column_mismatch_fails(run_repository, detail_store) -> None:
     catalogs = {
         "src:customers": [ColumnCatalogMetadata("id", "INTEGER", None, False, None, True)],
         "tgt:customers": [ColumnCatalogMetadata("id", "INTEGER", None, False, None, False)],
     }
-    service = _catalog_service(run_repository, catalogs)
+    service = _catalog_service(run_repository, detail_store, catalogs)
     result = service.execute(
         SchemaValidationRequest(
             source_connection_id="src",
@@ -179,12 +194,12 @@ def test_key_column_mismatch_fails(run_repository) -> None:
     assert bool(row["key_match"]) is False
 
 
-def test_default_mismatch_fails(run_repository) -> None:
+def test_default_mismatch_fails(run_repository, detail_store) -> None:
     catalogs = {
         "src:customers": [ColumnCatalogMetadata("id", "INTEGER", None, True, "0", False)],
         "tgt:customers": [ColumnCatalogMetadata("id", "INTEGER", None, True, "1", False)],
     }
-    service = _catalog_service(run_repository, catalogs)
+    service = _catalog_service(run_repository, detail_store, catalogs)
     result = service.execute(
         SchemaValidationRequest(
             source_connection_id="src",
@@ -198,12 +213,12 @@ def test_default_mismatch_fails(run_repository) -> None:
     assert bool(row["default_match"]) is False
 
 
-def test_custom_query_skips_catalog_lookup_even_with_table_set(run_repository) -> None:
+def test_custom_query_skips_catalog_lookup_even_with_table_set(run_repository, detail_store) -> None:
     catalogs = {
         "src:customers": [ColumnCatalogMetadata("id", "INTEGER", None, False, None, True)],
         "tgt:customers": [ColumnCatalogMetadata("id", "INTEGER", None, False, None, True)],
     }
-    service = _catalog_service(run_repository, catalogs)
+    service = _catalog_service(run_repository, detail_store, catalogs)
     result = service.execute(
         SchemaValidationRequest(
             source_connection_id="src",

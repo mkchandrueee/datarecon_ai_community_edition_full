@@ -19,6 +19,7 @@ class Settings:
     app_name: str = "DataRecon AI - Community Edition"
     app_version: str = "1.0.0"
     metadata_db_path: Path = field(default_factory=lambda: DATA_DIR / "datarecon_meta.db")
+    run_detail_dir: Path = field(default_factory=lambda: DATA_DIR / "run_details")
     encryption_key_path: Path = field(
         default_factory=lambda: Path(
             os.getenv("DATARECON_KEY_PATH", str(DATA_DIR / ".datarecon.key"))

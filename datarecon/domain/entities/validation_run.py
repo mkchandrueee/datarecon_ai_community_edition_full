@@ -2,9 +2,10 @@
 """Run-history record shared by every validation module (Modules 18/19/20).
 
 Only summary metrics are persisted here — full row-level detail (mismatch
-frames, duplicate samples, profile histograms) stays transient in the
-Streamlit session for immediate display/export (Module 18) and is not
-written to the metadata store. See ADR-0004.
+frames, duplicate samples, profile histograms) is never written to this
+metadata store (See ADR-0004), but is separately persisted per run_id in
+the Parquet-backed RunDetailStore (see ADR-0008) so Module 18 can replay
+it later.
 """
 
 from __future__ import annotations

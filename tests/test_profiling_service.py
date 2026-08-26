@@ -15,7 +15,7 @@ from tests.conftest import FakeExtractionService
 
 
 @pytest.fixture
-def service(run_repository) -> ProfilingService:
+def service(run_repository, detail_store) -> ProfilingService:
     frames = {
         "mixed": pd.DataFrame(
             {
@@ -27,7 +27,7 @@ def service(run_repository) -> ProfilingService:
         ),
         "empty": pd.DataFrame({"id": [], "name": []}),
     }
-    return ProfilingService(FakeExtractionService(frames), run_repository)
+    return ProfilingService(FakeExtractionService(frames), run_repository, detail_store)
 
 
 def test_profiles_every_column_by_default(service: ProfilingService) -> None:
@@ -90,3 +90,23 @@ def test_persists_run_history(service: ProfilingService, run_repository) -> None
     fetched = run_repository.get_by_id(result.run.run_id)
     assert fetched is not None
     assert fetched.summary["total_rows"] == 20
+
+
+def test_persists_column_profiles_and_top_values_detail(
+    service: ProfilingService, detail_store
+) -> None:
+    result = service.execute(ProfilingRequest(connection_id="mixed", columns=["status"], top_n=2))
+    sections = detail_store.load_all(result.run.run_id)
+    assert set(sections) == {"Column Profiles", "Top Values - status"}
+    pd.testing.assert_frame_equal(
+        sections["Column Profiles"], result.column_profiles, check_dtype=False
+    )
+    pd.testing.assert_frame_equal(
+        sections["Top Values - status"], result.top_values["status"], check_dtype=False
+    )
+
+
+def test_does_not_persist_empty_top_values(service: ProfilingService, detail_store) -> None:
+    result = service.execute(ProfilingRequest(connection_id="empty"))
+    sections = detail_store.list_sections(result.run.run_id)
+    assert sections == ["Column Profiles"]

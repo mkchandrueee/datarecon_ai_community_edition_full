@@ -20,6 +20,7 @@ from datarecon.domain.entities.project import DEFAULT_PROJECT_ID
 from datarecon.domain.entities.validation_run import ValidationRun
 from datarecon.domain.enums import RunStatus, ValidationModule
 from datarecon.domain.interfaces.validation_run_repository import IValidationRunRepository
+from datarecon.infrastructure.persistence.run_detail_store import RunDetailStore
 
 
 @dataclass(frozen=True)
@@ -48,9 +49,15 @@ class RecordCountResult:
 
 
 class RecordCountService:
-    def __init__(self, extraction: DataExtractionService, run_repository: IValidationRunRepository):
+    def __init__(
+        self,
+        extraction: DataExtractionService,
+        run_repository: IValidationRunRepository,
+        detail_store: RunDetailStore,
+    ):
         self._extraction = extraction
         self._runs = run_repository
+        self._details = detail_store
 
     def execute(
         self,
@@ -102,6 +109,8 @@ class RecordCountService:
                 project_id=project_id,
                 suite_id=suite_id,
             )
+            if not breakdown.empty:
+                self._details.save(run.run_id, {"Group Breakdown": breakdown})
             return RecordCountResult(
                 source_count, target_count, difference, variance_percent, status, breakdown, run
             )

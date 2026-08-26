@@ -15,7 +15,7 @@ from tests.conftest import FakeExtractionService
 
 
 @pytest.fixture
-def service(run_repository) -> DuplicateValidationService:
+def service(run_repository, detail_store) -> DuplicateValidationService:
     frames = {
         "clean": pd.DataFrame({"id": [1, 2, 3, 4], "name": ["a", "b", "c", "d"]}),
         "with_dups": pd.DataFrame(
@@ -31,7 +31,7 @@ def service(run_repository) -> DuplicateValidationService:
             }
         ),
     }
-    return DuplicateValidationService(FakeExtractionService(frames), run_repository)
+    return DuplicateValidationService(FakeExtractionService(frames), run_repository, detail_store)
 
 
 def test_no_duplicates_passes(service: DuplicateValidationService) -> None:
@@ -90,3 +90,21 @@ def test_persists_run_history(service: DuplicateValidationService, run_repositor
     fetched = run_repository.get_by_id(result.run.run_id)
     assert fetched is not None
     assert fetched.summary["duplicate_row_count"] == 5
+
+
+def test_persists_duplicate_rows_detail_when_duplicates_found(
+    service: DuplicateValidationService, detail_store
+) -> None:
+    result = service.execute(
+        DuplicateValidationRequest(connection_id="with_dups", key_columns=["id"])
+    )
+    sections = detail_store.load_all(result.run.run_id)
+    assert set(sections) == {"Duplicate Rows"}
+    pd.testing.assert_frame_equal(sections["Duplicate Rows"], result.duplicates, check_dtype=False)
+
+
+def test_no_detail_persisted_when_no_duplicates(
+    service: DuplicateValidationService, detail_store
+) -> None:
+    result = service.execute(DuplicateValidationRequest(connection_id="clean", key_columns=["id"]))
+    assert detail_store.list_sections(result.run.run_id) == []

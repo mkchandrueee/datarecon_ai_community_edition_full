@@ -1,15 +1,18 @@
 # datarecon/presentation/views/reports_view.py — Module 18: Run history browser
 #
-# Only summary metrics are available here (ADR-0004) — row-level detail
-# from a past run is not retained; export it from the module's own view
-# immediately after running it.
+# Summary metrics always come from the SQLite metadata store (ADR-0004).
+# Row-level detail — when it was retained at execute() time — comes from the
+# separate Parquet-backed RunDetailStore (ADR-0008); older runs recorded
+# before that store existed (or modules that never produce a DataFrame,
+# e.g. File Comparison) simply have nothing to show here.
 from __future__ import annotations
 
 import pandas as pd
 import streamlit as st
 
-from datarecon.application.services.reporting_service import ReportPayload
+from datarecon.application.services.reporting_service import ReportPayload, ReportSection
 from datarecon.domain.enums import ValidationModule
+from datarecon.presentation.components.mismatch_styling import style_matched, style_mismatch
 from datarecon.presentation.components.report_export import (
     render_csv_download_button,
     render_export_buttons,
@@ -19,6 +22,7 @@ from datarecon.presentation.container import ServiceContainer
 _MODULE_FILTER_ALL = "All Modules"
 _ALL_PROJECTS = "All Projects"
 _ALL_TEST_SUITES = "All Test Suites"
+_STYLED_SECTIONS = {"Mismatches": style_mismatch, "Matched": style_matched}
 
 
 def render(container: ServiceContainer) -> None:
@@ -90,5 +94,35 @@ def render(container: ServiceContainer) -> None:
     run = next(r for r in runs if r.run_id == selected_run_id)
     st.json(run.summary)
 
-    payload = ReportPayload(title=f"{run.module.value} - {run.name}", summary=run.summary)
+    st.subheader("Row-level detail")
+    detail_sections = container.detail_store.load_all(run.run_id)
+    report_sections: list[ReportSection] = []
+    if not detail_sections:
+        st.caption(
+            "No row-level detail was retained for this run — it may predate detail "
+            "persistence, or its module (e.g. File Comparison) has no row-level output."
+        )
+    else:
+        tabs = st.tabs(list(detail_sections.keys()))
+        for tab, (title, df) in zip(tabs, detail_sections.items(), strict=True):
+            with tab:
+                styler = _STYLED_SECTIONS.get(title)
+                if styler is not None and not df.empty:
+                    st.dataframe(styler(df), use_container_width=True, hide_index=True)
+                else:
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+                render_csv_download_button(
+                    container.reporting_service,
+                    title,
+                    df,
+                    key=f"reports_dl_detail_{selected_run_id}_{title}",
+                    label=f"Download {title} CSV",
+                )
+            report_sections.append(ReportSection(title, df))
+
+    payload = ReportPayload(
+        title=f"{run.module.value} - {run.name}",
+        summary=run.summary,
+        sections=tuple(report_sections),
+    )
     render_export_buttons(container.reporting_service, payload, key_prefix="reports_history")

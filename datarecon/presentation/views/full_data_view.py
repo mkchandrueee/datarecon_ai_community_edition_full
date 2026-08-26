@@ -11,6 +11,7 @@ from datarecon.core.engine import ComparisonConfig
 from datarecon.domain.enums import ValidationModule
 from datarecon.presentation.components.connection_picker import connection_picker
 from datarecon.presentation.components.extraction_inputs import extraction_inputs
+from datarecon.presentation.components.mismatch_styling import style_matched, style_mismatch
 from datarecon.presentation.components.report_export import (
     render_csv_download_button,
     render_export_buttons,
@@ -19,9 +20,6 @@ from datarecon.presentation.components.run_status import render_status_badge
 from datarecon.presentation.components.test_suite_save import render_save_suite_section
 from datarecon.presentation.container import ServiceContainer
 
-_MISMATCH_CELL_STYLE = "background-color: #ffcdd2; color: #7a0000"
-_MATCH_ROW_STYLE = "background-color: #c8e6c9; color: #0a4d0a"
-
 
 def _mismatches_by_column(mismatch: pd.DataFrame) -> pd.Series:
     if mismatch.empty or "MISMATCHED_COLUMNS" not in mismatch.columns:
@@ -29,26 +27,6 @@ def _mismatches_by_column(mismatch: pd.DataFrame) -> pd.Series:
     exploded = mismatch["MISMATCHED_COLUMNS"].str.split(",").explode().str.strip()
     exploded = exploded[exploded != ""]
     return exploded.value_counts()
-
-
-def _highlight_mismatched_cells(row: pd.Series) -> list[str]:
-    mismatched_columns = {
-        c.strip() for c in str(row.get("MISMATCHED_COLUMNS", "")).split(",") if c.strip()
-    }
-    styles = []
-    for col in row.index:
-        base = col.removesuffix("_source").removesuffix("_target")
-        is_side_column = col.endswith("_source") or col.endswith("_target")
-        styles.append(_MISMATCH_CELL_STYLE if is_side_column and base in mismatched_columns else "")
-    return styles
-
-
-def _style_mismatch(mismatch: pd.DataFrame) -> object:
-    return mismatch.style.apply(_highlight_mismatched_cells, axis=1)
-
-
-def _style_matched(exact_match: pd.DataFrame) -> object:
-    return exact_match.style.apply(lambda row: [_MATCH_ROW_STYLE] * len(row), axis=1)
 
 
 def render(container: ServiceContainer) -> None:
@@ -163,7 +141,7 @@ def render(container: ServiceContainer) -> None:
                 st.dataframe(result.mismatch, use_container_width=True, hide_index=True)
             else:
                 st.dataframe(
-                    _style_mismatch(result.mismatch), use_container_width=True, hide_index=True
+                    style_mismatch(result.mismatch), use_container_width=True, hide_index=True
                 )
             render_csv_download_button(
                 container.reporting_service,
@@ -177,7 +155,7 @@ def render(container: ServiceContainer) -> None:
                 st.dataframe(result.exact_match, use_container_width=True, hide_index=True)
             else:
                 st.dataframe(
-                    _style_matched(result.exact_match), use_container_width=True, hide_index=True
+                    style_matched(result.exact_match), use_container_width=True, hide_index=True
                 )
             render_csv_download_button(
                 container.reporting_service,

@@ -16,7 +16,7 @@ from tests.conftest import FakeExtractionService
 
 
 @pytest.fixture
-def service(run_repository) -> AggregationValidationService:
+def service(run_repository, detail_store) -> AggregationValidationService:
     frames = {
         "src": pd.DataFrame(
             {
@@ -37,7 +37,7 @@ def service(run_repository) -> AggregationValidationService:
             }
         ),
     }
-    return AggregationValidationService(FakeExtractionService(frames), run_repository)
+    return AggregationValidationService(FakeExtractionService(frames), run_repository, detail_store)
 
 
 def test_sum_matches_and_passes(service: AggregationValidationService) -> None:
@@ -148,3 +148,20 @@ def test_persists_run_history(service: AggregationValidationService, run_reposit
     fetched = run_repository.get_by_id(result.run.run_id)
     assert fetched is not None
     assert fetched.summary["metrics_compared"] == 1
+
+
+def test_persists_aggregation_comparison_detail(
+    service: AggregationValidationService, detail_store
+) -> None:
+    result = service.execute(
+        AggregationValidationRequest(
+            source_connection_id="src",
+            target_connection_id="tgt_exact",
+            aggregations=[AggregationSpec(column="amount", function=AggregateFunction.SUM)],
+        )
+    )
+    sections = detail_store.load_all(result.run.run_id)
+    assert set(sections) == {"Aggregation Comparison"}
+    pd.testing.assert_frame_equal(
+        sections["Aggregation Comparison"], result.comparison, check_dtype=False
+    )

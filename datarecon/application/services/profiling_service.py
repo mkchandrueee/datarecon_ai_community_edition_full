@@ -27,6 +27,7 @@ from datarecon.domain.entities.project import DEFAULT_PROJECT_ID
 from datarecon.domain.entities.validation_run import ValidationRun
 from datarecon.domain.enums import RunStatus, ValidationModule
 from datarecon.domain.interfaces.validation_run_repository import IValidationRunRepository
+from datarecon.infrastructure.persistence.run_detail_store import RunDetailStore
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _PHONE_RE = re.compile(r"^\+?[\d\-().\s]{7,20}$")
@@ -57,9 +58,15 @@ class ProfilingResult:
 
 
 class ProfilingService:
-    def __init__(self, extraction: DataExtractionService, run_repository: IValidationRunRepository):
+    def __init__(
+        self,
+        extraction: DataExtractionService,
+        run_repository: IValidationRunRepository,
+        detail_store: RunDetailStore,
+    ):
         self._extraction = extraction
         self._runs = run_repository
+        self._details = detail_store
 
     def execute(
         self, request: ProfilingRequest, project_id: str = DEFAULT_PROJECT_ID
@@ -95,6 +102,11 @@ class ProfilingService:
                 summary={"total_rows": total_rows, "columns_profiled": len(columns)},
                 project_id=project_id,
             )
+            details = {"Column Profiles": profiles}
+            details.update(
+                {f"Top Values - {col}": df for col, df in top_values.items() if not df.empty}
+            )
+            self._details.save(run.run_id, details)
             return ProfilingResult(total_rows, profiles, top_values, run)
         except Exception as exc:
             record_run(

@@ -24,6 +24,7 @@ from datarecon.application.services.reporting_service import ReportingService
 from datarecon.application.services.schema_validation_service import SchemaValidationService
 from datarecon.application.services.test_suite_service import TestSuiteService
 from datarecon.domain.interfaces.validation_run_repository import IValidationRunRepository
+from datarecon.infrastructure.persistence.run_detail_store import RunDetailStore
 
 
 @dataclass(frozen=True)
@@ -43,3 +44,4 @@ class ServiceContainer:
     project_service: ProjectService
     test_suite_service: TestSuiteService
     run_repository: IValidationRunRepository
+    detail_store: RunDetailStore

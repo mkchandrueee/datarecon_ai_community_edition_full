@@ -14,13 +14,13 @@ from tests.conftest import FakeExtractionService
 
 
 @pytest.fixture
-def service(run_repository) -> FullDataValidationService:
+def service(run_repository, detail_store) -> FullDataValidationService:
     frames = {
         "src": pd.DataFrame({"id": [1, 2, 3], "amount": [10.0, 20.0, 30.0]}),
         "tgt_exact": pd.DataFrame({"id": [1, 2, 3], "amount": [10.0, 20.0, 30.0]}),
         "tgt_mismatch": pd.DataFrame({"id": [1, 2, 4], "amount": [10.0, 99.0, 40.0]}),
     }
-    return FullDataValidationService(FakeExtractionService(frames), run_repository)
+    return FullDataValidationService(FakeExtractionService(frames), run_repository, detail_store)
 
 
 def test_exact_match_passes_and_records_run(
@@ -58,6 +58,26 @@ def test_project_id_defaults_and_can_be_overridden(
     fetched = run_repository.get_by_id(tagged_outcome.run.run_id)
     assert fetched is not None
     assert fetched.project_id == "proj-a"
+
+
+def test_persists_all_four_detail_sections(
+    service: FullDataValidationService, detail_store
+) -> None:
+    outcome = service.execute(
+        FullValidationRequest(
+            source_connection_id="src", target_connection_id="tgt_mismatch", business_keys=["id"]
+        )
+    )
+    sections = detail_store.load_all(outcome.run.run_id)
+    assert set(sections) == {"Mismatches", "Missing in Target", "Extra in Target", "Matched"}
+    pd.testing.assert_frame_equal(sections["Mismatches"], outcome.result.mismatch, check_dtype=False)
+    pd.testing.assert_frame_equal(
+        sections["Missing in Target"], outcome.result.missing_in_target, check_dtype=False
+    )
+    pd.testing.assert_frame_equal(
+        sections["Extra in Target"], outcome.result.extra_in_target, check_dtype=False
+    )
+    pd.testing.assert_frame_equal(sections["Matched"], outcome.result.exact_match, check_dtype=False)
 
 
 def test_mismatch_fails_and_records_run(service: FullDataValidationService) -> None:

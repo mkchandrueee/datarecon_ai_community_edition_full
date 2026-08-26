@@ -14,14 +14,14 @@ from tests.conftest import FakeExtractionService
 
 
 @pytest.fixture
-def service(run_repository) -> RecordCountService:
+def service(run_repository, detail_store) -> RecordCountService:
     frames = {
         "src": pd.DataFrame({"id": range(100), "region": ["east"] * 60 + ["west"] * 40}),
         "tgt_exact": pd.DataFrame({"id": range(100), "region": ["east"] * 60 + ["west"] * 40}),
         "tgt_short": pd.DataFrame({"id": range(90), "region": ["east"] * 55 + ["west"] * 35}),
         "tgt_empty": pd.DataFrame({"id": [], "region": []}),
     }
-    return RecordCountService(FakeExtractionService(frames), run_repository)
+    return RecordCountService(FakeExtractionService(frames), run_repository, detail_store)
 
 
 def test_exact_match_passes(service: RecordCountService) -> None:
@@ -92,6 +92,28 @@ def test_persists_run_history(service: RecordCountService, run_repository) -> No
     fetched = run_repository.get_by_id(result.run.run_id)
     assert fetched is not None
     assert fetched.summary["source_count"] == 100
+
+
+def test_persists_group_breakdown_detail_when_grouped(
+    service: RecordCountService, detail_store
+) -> None:
+    result = service.execute(
+        RecordCountRequest(
+            source_connection_id="src", target_connection_id="tgt_short", group_by=["region"]
+        )
+    )
+    sections = detail_store.load_all(result.run.run_id)
+    assert set(sections) == {"Group Breakdown"}
+    pd.testing.assert_frame_equal(
+        sections["Group Breakdown"], result.group_breakdown, check_dtype=False
+    )
+
+
+def test_no_detail_persisted_without_group_by(service: RecordCountService, detail_store) -> None:
+    result = service.execute(
+        RecordCountRequest(source_connection_id="src", target_connection_id="tgt_exact")
+    )
+    assert detail_store.list_sections(result.run.run_id) == []
 
 
 def test_extraction_failure_records_error_run(service: RecordCountService, run_repository) -> None:

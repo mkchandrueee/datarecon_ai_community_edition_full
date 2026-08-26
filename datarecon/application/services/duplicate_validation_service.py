@@ -20,6 +20,7 @@ from datarecon.domain.entities.project import DEFAULT_PROJECT_ID
 from datarecon.domain.entities.validation_run import ValidationRun
 from datarecon.domain.enums import RunStatus, ValidationModule
 from datarecon.domain.interfaces.validation_run_repository import IValidationRunRepository
+from datarecon.infrastructure.persistence.run_detail_store import RunDetailStore
 
 
 class DuplicateValidationError(ValueError):
@@ -48,9 +49,15 @@ class DuplicateValidationResult:
 
 
 class DuplicateValidationService:
-    def __init__(self, extraction: DataExtractionService, run_repository: IValidationRunRepository):
+    def __init__(
+        self,
+        extraction: DataExtractionService,
+        run_repository: IValidationRunRepository,
+        detail_store: RunDetailStore,
+    ):
         self._extraction = extraction
         self._runs = run_repository
+        self._details = detail_store
 
     def execute(
         self,
@@ -87,6 +94,8 @@ class DuplicateValidationService:
                 project_id=project_id,
                 suite_id=suite_id,
             )
+            if not duplicates.empty:
+                self._details.save(run.run_id, {"Duplicate Rows": duplicates})
             return DuplicateValidationResult(
                 total_rows, dup_key_count, dup_row_count, duplicate_percent, status, duplicates, run
             )

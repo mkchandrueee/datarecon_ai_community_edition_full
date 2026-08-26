@@ -27,6 +27,7 @@ from datarecon.domain.entities.project import DEFAULT_PROJECT_ID
 from datarecon.domain.entities.validation_run import ValidationRun
 from datarecon.domain.enums import RunStatus, ValidationModule
 from datarecon.domain.interfaces.validation_run_repository import IValidationRunRepository
+from datarecon.infrastructure.persistence.run_detail_store import RunDetailStore
 
 _SCHEMA_SAMPLE_SIZE = 1000
 _CRITICAL_STATUSES = frozenset({"MISSING_IN_TARGET", "EXTRA_IN_TARGET", "TYPE_MISMATCH"})
@@ -65,9 +66,15 @@ def _dtype_category(dtype: object) -> str:
 
 
 class SchemaValidationService:
-    def __init__(self, extraction: DataExtractionService, run_repository: IValidationRunRepository):
+    def __init__(
+        self,
+        extraction: DataExtractionService,
+        run_repository: IValidationRunRepository,
+        detail_store: RunDetailStore,
+    ):
         self._extraction = extraction
         self._runs = run_repository
+        self._details = detail_store
 
     def execute(
         self,
@@ -129,6 +136,7 @@ class SchemaValidationService:
                 project_id=project_id,
                 suite_id=suite_id,
             )
+            self._details.save(run.run_id, {"Column Comparison": comparison})
             return SchemaValidationResult(status, comparison, run)
         except Exception as exc:
             record_run(
