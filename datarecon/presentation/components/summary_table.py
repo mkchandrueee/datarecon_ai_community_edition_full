@@ -40,6 +40,34 @@ def render_summary_table(summary: dict[str, Any], caption: str | None = None) ->
     return frame
 
 
+def params_frame(params: dict[str, Any]) -> pd.DataFrame:
+    """Turn a saved config dict into a Parameter/Value frame.
+
+    Unlike a run summary, config values can be lists (business keys) or dicts
+    (comparison options), so those are flattened into readable text rather
+    than shown as Python reprs. Nested dicts become one row per leaf, keyed
+    `parent.child`, which keeps the table flat and sortable.
+    """
+    rows: list[dict[str, str]] = []
+    for key, value in params.items():
+        if isinstance(value, dict):
+            rows.extend(
+                {"Parameter": f"{_humanise(key)} — {_humanise(k)}", "Value": _format_value(k, v)}
+                for k, v in value.items()
+            )
+        else:
+            rows.append({"Parameter": _humanise(key), "Value": _format_value(key, value)})
+    return pd.DataFrame(rows, columns=["Parameter", "Value"])
+
+
+def render_params_table(params: dict[str, Any]) -> None:
+    frame = params_frame(params)
+    if frame.empty:
+        st.caption("No additional parameters saved.")
+        return
+    st.dataframe(frame, use_container_width=True, hide_index=True)
+
+
 def _humanise(key: str) -> str:
     return str(key).replace("_", " ").strip().title()
 
@@ -54,6 +82,16 @@ def _format_value(key: str, value: Any) -> str:
         return f"{value:,.4f}".rstrip("0").rstrip(".") if value % 1 else f"{int(value):,}"
     if value is None:
         return "—"
+    if isinstance(value, (list, tuple)):
+        # Business keys, group-by columns, aggregation specs — a comma list
+        # reads far better than a Python repr full of brackets and quotes.
+        return ", ".join(_format_item(v) for v in value) if value else "—"
     if str(key).casefold() in _STATUS_KEYS:
         return str(value).upper()
+    return str(value)
+
+
+def _format_item(value: Any) -> str:
+    if isinstance(value, dict):
+        return " ".join(str(v) for v in value.values() if v is not None)
     return str(value)

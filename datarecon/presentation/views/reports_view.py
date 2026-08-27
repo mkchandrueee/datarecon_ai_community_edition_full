@@ -28,8 +28,67 @@ _STYLED_SECTIONS = {"Mismatches": style_mismatch, "Matched": style_matched}
 
 
 def render(container: ServiceContainer) -> None:
-    st.header("Reports — Run History")
+    """All reporting lives here: per-run history and the module-wise rollup
+    of what each Test Suite last measured."""
+    st.header("Reports")
+    tab_history, tab_modules = st.tabs(["Run History", "Module-wise Report"])
+    with tab_history:
+        _render_run_history(container)
+    with tab_modules:
+        _render_module_reports(container)
 
+
+def _render_module_reports(container: ServiceContainer) -> None:
+    """Per-module tables of what each suite last measured, plus a combined
+    export — the suite list alone says whether a suite passed, not by how much."""
+    projects = container.project_service.list_projects()
+    project_names = [_ALL_PROJECTS, *[p.name for p in projects]]
+    selected_name = st.selectbox("Project", project_names, key="reports_modules_project")
+    project_id = (
+        None
+        if selected_name == _ALL_PROJECTS
+        else next(p.project_id for p in projects if p.name == selected_name)
+    )
+
+    reports = container.suite_report_service.module_reports(project_id)
+    if not reports:
+        st.info(
+            "No test suites saved yet. Save one from any validation module's "
+            "'Save as Test Suite' section."
+        )
+        return
+
+    for report in reports:
+        module = report.module
+        with st.expander(
+            f"{module.value} — {report.suite_count} suite(s), "
+            f"{report.passed} passed / {report.failed} failed",
+            expanded=True,
+        ):
+            st.dataframe(report.table, use_container_width=True, hide_index=True)
+            render_csv_download_button(
+                container.reporting_service,
+                f"{module.code}_Report",
+                report.table,
+                key=f"reports_module_csv_{module.name}",
+                label=f"Download {module.code} CSV",
+            )
+
+    payload = ReportPayload(
+        title="Test Suite Module Report",
+        summary={
+            "modules": len(reports),
+            "suites": sum(r.suite_count for r in reports),
+            "passed": sum(r.passed for r in reports),
+            "failed": sum(r.failed for r in reports),
+        },
+        sections=tuple(ReportSection(r.module.value, r.table) for r in reports),
+    )
+    st.caption("Combined report — all modules above")
+    render_export_buttons(container.reporting_service, payload, key_prefix="reports_module_report")
+
+
+def _render_run_history(container: ServiceContainer) -> None:
     projects = container.project_service.list_projects()
     suites = container.test_suite_service.list_suites()
     project_names = [_ALL_PROJECTS, *[p.name for p in projects]]

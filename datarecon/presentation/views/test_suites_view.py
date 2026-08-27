@@ -7,14 +7,13 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-from datarecon.application.services.reporting_service import ReportPayload, ReportSection
 from datarecon.domain.entities.test_suite import TestSuite
-from datarecon.presentation.components.report_export import (
-    render_csv_download_button,
-    render_export_buttons,
-)
+from datarecon.domain.enums import ValidationModule
 from datarecon.presentation.components.run_status import render_status_badge
-from datarecon.presentation.components.summary_table import render_summary_table
+from datarecon.presentation.components.summary_table import (
+    render_params_table,
+    render_summary_table,
+)
 from datarecon.presentation.container import ServiceContainer
 
 _ALL_PROJECTS = "All Projects"
@@ -68,45 +67,56 @@ def _render_suite_details(container: ServiceContainer, suite: TestSuite) -> None
     other_params = {k: v for k, v in config.items() if k not in _NON_PARAM_KEYS}
     if other_params:
         st.markdown("**Other parameters**")
-        st.json(other_params)
+        render_params_table(other_params)
 
 
-def _render_module_reports(container: ServiceContainer, project_id: str | None) -> None:
-    """Per-module tables of what each suite last measured, plus a combined
-    export — the suite list alone says whether a suite passed, not by how much."""
-    reports = container.suite_report_service.module_reports(project_id)
-    if not reports:
-        return
+def _render_grouped_suites(
+    suites: list[TestSuite], project_name_by_id: dict[str, str]
+) -> None:
+    """Suites grouped by project, then by module.
 
-    st.subheader("Module-wise Report")
-    for report in reports:
-        module = report.module
-        with st.expander(
-            f"{module.value} — {report.suite_count} suite(s), "
-            f"{report.passed} passed / {report.failed} failed",
-            expanded=True,
-        ):
-            st.dataframe(report.table, use_container_width=True, hide_index=True)
-            render_csv_download_button(
-                container.reporting_service,
-                f"{module.code}_Report",
-                report.table,
-                key=f"ts_report_csv_{module.name}",
-                label=f"Download {module.code} CSV",
-            )
+    A flat list stops being navigable once a team has suites across several
+    projects and all six modules; the grouping mirrors how they're actually
+    organised and puts each module's suites side by side.
+    """
+    by_project: dict[str, list[TestSuite]] = {}
+    for suite in suites:
+        by_project.setdefault(suite.project_id, []).append(suite)
 
-    payload = ReportPayload(
-        title="Test Suite Module Report",
-        summary={
-            "modules": len(reports),
-            "suites": sum(r.suite_count for r in reports),
-            "passed": sum(r.passed for r in reports),
-            "failed": sum(r.failed for r in reports),
-        },
-        sections=tuple(ReportSection(r.module.value, r.table) for r in reports),
-    )
-    st.caption("Combined report — all modules above")
-    render_export_buttons(container.reporting_service, payload, key_prefix="ts_module_report")
+    for project_id, project_suites in sorted(
+        by_project.items(), key=lambda kv: project_name_by_id.get(kv[0], kv[0]).casefold()
+    ):
+        project_label = project_name_by_id.get(project_id, project_id)
+        st.markdown(f"### {project_label}  ·  {len(project_suites)} suite(s)")
+
+        by_module: dict[ValidationModule, list[TestSuite]] = {}
+        for suite in project_suites:
+            by_module.setdefault(suite.module, []).append(suite)
+
+        for module in ValidationModule:  # declaration order keeps layout stable
+            module_suites = by_module.get(module)
+            if not module_suites:
+                continue
+            with st.expander(
+                f"{module.value} — {len(module_suites)} suite(s)", expanded=True
+            ):
+                st.dataframe(
+                    pd.DataFrame(
+                        [
+                            {
+                                "Test Suite": s.name,
+                                "Last Run Status": (
+                                    s.last_run_status.value if s.last_run_status else "never run"
+                                ),
+                                "Last Run": s.last_run_at,
+                                "Created": s.created_at,
+                            }
+                            for s in sorted(module_suites, key=lambda s: s.name)
+                        ]
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
 
 def render(container: ServiceContainer) -> None:
@@ -133,22 +143,7 @@ def render(container: ServiceContainer) -> None:
         return
 
     project_name_by_id = {p.project_id: p.name for p in projects}
-    table = pd.DataFrame(
-        [
-            {
-                "name": s.name,
-                "project": project_name_by_id.get(s.project_id, s.project_id),
-                "module": s.module.value,
-                "last_run_status": s.last_run_status.value if s.last_run_status else "never run",
-                "last_run_at": s.last_run_at,
-                "created_at": s.created_at,
-            }
-            for s in suites
-        ]
-    )
-    st.dataframe(table, use_container_width=True, hide_index=True)
-
-    _render_module_reports(container, project_id)
+    _render_grouped_suites(suites, project_name_by_id)
 
     st.subheader("Run a Test Suite")
     selected_name = st.selectbox("Test Suite", [s.name for s in suites], key="ts_selected_suite")

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datarecon.presentation.components.summary_table import summary_frame
+from datarecon.presentation.components.summary_table import params_frame, summary_frame
 
 
 def test_summary_frame_has_metric_and_value_columns() -> None:
@@ -56,3 +56,41 @@ def test_empty_summary_gives_empty_frame_with_columns() -> None:
 def test_row_order_follows_the_summary() -> None:
     frame = summary_frame({"b": 1, "a": 2})
     assert list(frame["Metric"]) == ["B", "A"]
+
+
+# ---------- saved-config parameter tables (Test Suites) ----------
+
+
+def test_params_frame_has_parameter_and_value_columns() -> None:
+    frame = params_frame({"tolerance_percent": 0.5})
+    assert list(frame.columns) == ["Parameter", "Value"]
+
+
+def test_params_frame_flattens_lists_into_comma_text() -> None:
+    frame = params_frame({"business_keys": ["CUSTOMER_ID", "ORDER_ID"]})
+    assert frame["Value"].iloc[0] == "CUSTOMER_ID, ORDER_ID"
+
+
+def test_params_frame_renders_empty_list_as_dash() -> None:
+    frame = params_frame({"group_by": []})
+    assert frame["Value"].iloc[0] == "—"
+
+
+def test_params_frame_expands_nested_dict_into_rows() -> None:
+    frame = params_frame({"config": {"nulls_equal": True, "float_tolerance": 0.01}})
+    params = dict(zip(frame["Parameter"], frame["Value"], strict=True))
+    assert params["Config — Nulls Equal"] == "Yes"
+    assert params["Config — Float Tolerance"] == "0.01"
+
+
+def test_params_frame_formats_list_of_dicts_readably() -> None:
+    frame = params_frame(
+        {"aggregations": [{"column": "AMOUNT", "function": "SUM", "alias": None}]}
+    )
+    assert frame["Value"].iloc[0] == "AMOUNT SUM"
+
+
+def test_params_frame_empty_input() -> None:
+    frame = params_frame({})
+    assert frame.empty
+    assert list(frame.columns) == ["Parameter", "Value"]

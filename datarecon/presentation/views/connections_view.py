@@ -42,9 +42,15 @@ _SECRET_LABELS = {
     DatabaseType.DATABRICKS: "Personal Access Token",
 }
 
+#: Carries the save confirmation across the st.rerun() that follows a save.
+_SAVED_MESSAGE_KEY = "connections_saved_message"
+
 
 def render(service: ConnectionService) -> None:
     st.header("Connection Management")
+    saved_message = st.session_state.pop(_SAVED_MESSAGE_KEY, None)
+    if saved_message:
+        st.success(saved_message)
     tab_list, tab_create = st.tabs(["Connections", "Create / Edit"])
     with tab_list:
         _render_grid(service)
@@ -103,7 +109,7 @@ def _render_grid(service: ConnectionService) -> None:
 
     if col_clone.button("Clone", use_container_width=True):
         clone = service.clone_connection(cid)
-        st.success(f"Cloned as '{clone.connection_name}'.")
+        st.session_state[_SAVED_MESSAGE_KEY] = f"Cloned as '{clone.connection_name}'."
         st.rerun()
 
     if col_delete.button("Delete", type="primary", use_container_width=True):
@@ -352,13 +358,20 @@ def _render_form(service: ConnectionService, existing: Connection | None) -> Non
             entity.environment = environment
             entity.schema_name = schema_name or None
 
+            # st.rerun() below wipes the current render, so the confirmation is
+            # stashed and shown on the next pass instead of flashing away.
             if is_edit:
                 service.update_connection(entity, password or None)
                 st.session_state.pop("edit_connection_id", None)
-                st.success("Connection updated.")
+                st.session_state[_SAVED_MESSAGE_KEY] = (
+                    f"Connection '{entity.connection_name}' updated successfully."
+                )
             else:
                 service.create_connection(entity, password)
-                st.success(f"Connection '{entity.connection_name}' created.")
+                st.session_state[_SAVED_MESSAGE_KEY] = (
+                    f"Connection '{entity.connection_name}' "
+                    f"({entity.database_type.value}) saved successfully."
+                )
             st.rerun()
         except ValueError as err:
             st.error(str(err))
