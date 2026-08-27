@@ -22,6 +22,7 @@ from datarecon.application.services.project_service import ProjectService
 from datarecon.application.services.record_count_service import RecordCountService
 from datarecon.application.services.reporting_service import ReportingService
 from datarecon.application.services.schema_validation_service import SchemaValidationService
+from datarecon.application.services.sql_generation_service import SqlGenerationService
 from datarecon.application.services.suite_report_service import SuiteReportService
 from datarecon.application.services.test_suite_service import TestSuiteService
 from datarecon.domain.interfaces.validation_run_repository import IValidationRunRepository
@@ -45,5 +46,6 @@ class ServiceContainer:
     project_service: ProjectService
     test_suite_service: TestSuiteService
     suite_report_service: SuiteReportService
+    sql_generation_service: SqlGenerationService
     run_repository: IValidationRunRepository
     detail_store: RunDetailStore

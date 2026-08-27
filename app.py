@@ -21,6 +21,7 @@ from datarecon.application.services.project_service import ProjectService
 from datarecon.application.services.record_count_service import RecordCountService
 from datarecon.application.services.reporting_service import ReportingService
 from datarecon.application.services.schema_validation_service import SchemaValidationService
+from datarecon.application.services.sql_generation_service import SqlGenerationService
 from datarecon.application.services.suite_report_service import SuiteReportService
 from datarecon.application.services.test_suite_service import TestSuiteService
 from datarecon.infrastructure.connectors.engine_factory import EngineFactory
@@ -44,6 +45,7 @@ from datarecon.presentation.components.sidebar import render_sidebar
 from datarecon.presentation.container import ServiceContainer
 from datarecon.presentation.views import (
     aggregation_view,
+    bulk_setup_view,
     connections_view,
     dashboard_view,
     duplicate_view,
@@ -71,6 +73,7 @@ _PAGE_RENDERERS = {
     "Reports": reports_view.render,
     "Projects": projects_view.render,
     "Test Suites": test_suites_view.render,
+    "Bulk Setup": bulk_setup_view.render,
 }
 
 
@@ -126,6 +129,7 @@ def build_container() -> ServiceContainer:
             full_data_service,
         ),
         suite_report_service=SuiteReportService(test_suite_repository, run_repository),
+        sql_generation_service=SqlGenerationService(extraction_service),
         run_repository=run_repository,
         detail_store=detail_store,
     )

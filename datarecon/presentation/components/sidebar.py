@@ -10,6 +10,7 @@ PAGES = (
     "Connections",
     "Projects",
     "Test Suites",
+    "Bulk Setup",
     "Schema Validation",
     "Record Count Validation",
     "Duplicate Validation",

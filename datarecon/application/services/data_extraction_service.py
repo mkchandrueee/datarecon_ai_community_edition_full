@@ -7,7 +7,7 @@ from typing import Any
 import pandas as pd
 
 from datarecon.domain.entities.column_catalog_metadata import ColumnCatalogMetadata
-from datarecon.domain.enums import FileFormat
+from datarecon.domain.enums import DatabaseType, FileFormat
 from datarecon.domain.interfaces.connection_repository import IConnectionRepository
 from datarecon.domain.interfaces.data_extractor import IDataExtractionService
 from datarecon.infrastructure.extraction.data_extractor import (
@@ -71,3 +71,9 @@ class DataExtractionService(IDataExtractionService):
             return None
         secret = self._cipher.decrypt(conn.password_encrypted) or ""
         return self._extractor.get_catalog_columns(conn, table, secret)
+
+    def get_database_type(self, connection_id: str) -> DatabaseType | None:
+        """The connection's dialect, for callers that must write SQL against it
+        (identifier quoting differs between MySQL, SQL Server and the rest)."""
+        conn = self._repo.get_by_id(connection_id)
+        return conn.database_type if conn else None

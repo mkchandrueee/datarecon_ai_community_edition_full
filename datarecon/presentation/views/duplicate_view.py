@@ -11,6 +11,7 @@ from datarecon.presentation.components.connection_picker import connection_picke
 from datarecon.presentation.components.extraction_inputs import extraction_inputs
 from datarecon.presentation.components.report_export import render_export_buttons
 from datarecon.presentation.components.run_status import render_status_badge
+from datarecon.presentation.components.sql_assist import render_sql_assist
 from datarecon.presentation.components.test_suite_save import render_save_suite_section
 from datarecon.presentation.container import ServiceContainer
 
@@ -21,6 +22,13 @@ def render(container: ServiceContainer) -> None:
 
     connection_id = connection_picker("Connection", connections, key="dup_connection")
     query, table = extraction_inputs("Source", "dup")
+    generated = render_sql_assist(
+        container, ValidationModule.DUPLICATE, connection_id, "dup", table
+    )
+    # The catalog's primary key is the natural duplicate key, so seed the box
+    # with it once — the user stays free to edit or replace it afterwards.
+    if generated and generated.suggested_keys and not st.session_state.get("dup_keys"):
+        st.session_state["dup_keys"] = ", ".join(generated.suggested_keys)
     key_columns_raw = st.text_input("Key Column(s), comma-separated", key="dup_keys")
     sample_limit = st.number_input(
         "Sample Limit", min_value=10, max_value=100_000, value=1000, key="dup_limit"

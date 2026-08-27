@@ -11,6 +11,7 @@ from datarecon.presentation.components.connection_picker import connection_picke
 from datarecon.presentation.components.extraction_inputs import extraction_inputs
 from datarecon.presentation.components.report_export import render_export_buttons
 from datarecon.presentation.components.run_status import render_status_badge
+from datarecon.presentation.components.sql_assist import render_sql_assist
 from datarecon.presentation.components.test_suite_save import render_save_suite_section
 from datarecon.presentation.container import ServiceContainer
 
@@ -24,10 +25,16 @@ def render(container: ServiceContainer) -> None:
         st.subheader("Source")
         source_id = connection_picker("Source Connection", connections, key="rc_source")
         source_query, source_table = extraction_inputs("Source", "rc_source")
+        render_sql_assist(
+            container, ValidationModule.RECORD_COUNT, source_id, "rc_source", source_table
+        )
     with col2:
         st.subheader("Target")
         target_id = connection_picker("Target Connection", connections, key="rc_target")
         target_query, target_table = extraction_inputs("Target", "rc_target")
+        render_sql_assist(
+            container, ValidationModule.RECORD_COUNT, target_id, "rc_target", target_table
+        )
 
     group_by_raw = st.text_input("Group By Columns (comma-separated, optional)", key="rc_group_by")
     c1, c2 = st.columns(2)

@@ -13,6 +13,7 @@ from datarecon.presentation.components.connection_picker import connection_picke
 from datarecon.presentation.components.extraction_inputs import extraction_inputs
 from datarecon.presentation.components.report_export import render_export_buttons
 from datarecon.presentation.components.run_status import render_status_badge
+from datarecon.presentation.components.sql_assist import render_sql_assist
 from datarecon.presentation.components.test_suite_save import render_save_suite_section
 from datarecon.presentation.container import ServiceContainer
 
@@ -23,6 +24,13 @@ def render(container: ServiceContainer) -> None:
 
     connection_id = connection_picker("Connection", connections, key="null_connection")
     query, table = extraction_inputs("Source", "null")
+    generated = render_sql_assist(
+        container, ValidationModule.NULLABILITY, connection_id, "null", table
+    )
+    # Columns the catalog declares NOT NULL are where a null is a real defect,
+    # so seed those once rather than checking every column by default.
+    if generated and generated.suggested_columns and not st.session_state.get("null_columns"):
+        st.session_state["null_columns"] = ", ".join(generated.suggested_columns)
     columns_raw = st.text_input(
         "Columns to check (comma-separated, blank = all)", key="null_columns"
     )
