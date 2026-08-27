@@ -172,6 +172,7 @@ class ValidationModule(StrEnum):
     NULLABILITY = "Nullability Validation"
     AGGREGATION = "Aggregation Validation"
     FULL_DATA = "Full Data Validation"
+    REFERENTIAL_INTEGRITY = "Referential Integrity"
     PROFILING = "Data Profiling"
     FILE_COMPARISON = "File Comparison"
 
@@ -189,6 +190,7 @@ _MODULE_CODES = {
     ValidationModule.NULLABILITY: "NV",
     ValidationModule.AGGREGATION: "AG",
     ValidationModule.FULL_DATA: "FD",
+    ValidationModule.REFERENTIAL_INTEGRITY: "RI",
     ValidationModule.PROFILING: "DP",
     ValidationModule.FILE_COMPARISON: "FC",
 }

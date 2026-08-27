@@ -19,6 +19,9 @@ from datarecon.application.services.nullability_validation_service import (
 from datarecon.application.services.profiling_service import ProfilingService
 from datarecon.application.services.project_service import ProjectService
 from datarecon.application.services.record_count_service import RecordCountService
+from datarecon.application.services.referential_integrity_service import (
+    ReferentialIntegrityService,
+)
 from datarecon.application.services.reporting_service import ReportingService
 from datarecon.application.services.schema_validation_service import SchemaValidationService
 from datarecon.application.services.sql_generation_service import SqlGenerationService
@@ -55,6 +58,7 @@ from datarecon.presentation.views import (
     profiling_view,
     projects_view,
     record_count_view,
+    referential_integrity_view,
     reports_view,
     schema_view,
     test_suites_view,
@@ -67,6 +71,7 @@ _PAGE_RENDERERS = {
     "Duplicate Validation": duplicate_view.render,
     "Nullability Validation": nullability_view.render,
     "Full Data Validation": full_data_view.render,
+    "Referential Integrity": referential_integrity_view.render,
     "Aggregation Validation": aggregation_view.render,
     "Data Profiling": profiling_view.render,
     "File Comparison": file_comparison_view.render,
@@ -103,6 +108,9 @@ def build_container() -> ServiceContainer:
         extraction_service, run_repository, detail_store
     )
     full_data_service = FullDataValidationService(extraction_service, run_repository, detail_store)
+    referential_integrity_service = ReferentialIntegrityService(
+        extraction_service, run_repository, detail_store
+    )
 
     return ServiceContainer(
         connection_service=ConnectionService(connection_repository, cipher, engine_factory),
@@ -113,6 +121,7 @@ def build_container() -> ServiceContainer:
         nullability_service=nullability_service,
         aggregation_service=aggregation_service,
         full_data_service=full_data_service,
+        referential_integrity_service=referential_integrity_service,
         profiling_service=ProfilingService(extraction_service, run_repository, detail_store),
         file_checksum_service=FileChecksumService(connection_repository, run_repository),
         reporting_service=ReportingService(),
@@ -127,6 +136,7 @@ def build_container() -> ServiceContainer:
             nullability_service,
             aggregation_service,
             full_data_service,
+            referential_integrity_service,
         ),
         suite_report_service=SuiteReportService(test_suite_repository, run_repository),
         sql_generation_service=SqlGenerationService(extraction_service),

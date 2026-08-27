@@ -20,6 +20,9 @@ from datarecon.application.services.nullability_validation_service import (
 from datarecon.application.services.profiling_service import ProfilingService
 from datarecon.application.services.project_service import ProjectService
 from datarecon.application.services.record_count_service import RecordCountService
+from datarecon.application.services.referential_integrity_service import (
+    ReferentialIntegrityService,
+)
 from datarecon.application.services.reporting_service import ReportingService
 from datarecon.application.services.schema_validation_service import SchemaValidationService
 from datarecon.application.services.sql_generation_service import SqlGenerationService
@@ -39,6 +42,7 @@ class ServiceContainer:
     nullability_service: NullabilityValidationService
     aggregation_service: AggregationValidationService
     full_data_service: FullDataValidationService
+    referential_integrity_service: ReferentialIntegrityService
     profiling_service: ProfilingService
     file_checksum_service: FileChecksumService
     reporting_service: ReportingService

@@ -7,6 +7,7 @@ from typing import Any
 import pandas as pd
 
 from datarecon.domain.entities.column_catalog_metadata import ColumnCatalogMetadata
+from datarecon.domain.entities.foreign_key_metadata import ForeignKeyMetadata
 from datarecon.domain.enums import DatabaseType, FileFormat
 from datarecon.domain.interfaces.connection_repository import IConnectionRepository
 from datarecon.domain.interfaces.data_extractor import IDataExtractionService
@@ -71,6 +72,16 @@ class DataExtractionService(IDataExtractionService):
             return None
         secret = self._cipher.decrypt(conn.password_encrypted) or ""
         return self._extractor.get_catalog_columns(conn, table, secret)
+
+    def get_foreign_keys(
+        self, connection_id: str, table: str
+    ) -> list[ForeignKeyMetadata] | None:
+        """Foreign keys the catalog declares on `table` (ADR-0012)."""
+        conn = self._repo.get_by_id(connection_id)
+        if conn is None:
+            return None
+        secret = self._cipher.decrypt(conn.password_encrypted) or ""
+        return self._extractor.get_foreign_keys(conn, table, secret)
 
     def get_database_type(self, connection_id: str) -> DatabaseType | None:
         """The connection's dialect, for callers that must write SQL against it

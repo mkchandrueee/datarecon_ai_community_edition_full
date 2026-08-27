@@ -26,6 +26,10 @@ from datarecon.application.services.record_count_service import (
     RecordCountRequest,
     RecordCountService,
 )
+from datarecon.application.services.referential_integrity_service import (
+    ReferentialIntegrityRequest,
+    ReferentialIntegrityService,
+)
 from datarecon.application.services.schema_validation_service import (
     SchemaValidationRequest,
     SchemaValidationService,
@@ -65,6 +69,7 @@ def service(
         NullabilityValidationService(extraction, run_repository, detail_store),
         AggregationValidationService(extraction, run_repository, detail_store),
         FullDataValidationService(extraction, run_repository, detail_store),
+        ReferentialIntegrityService(extraction, run_repository, detail_store),
     )
 
 
@@ -320,3 +325,26 @@ def test_save_suite_does_not_double_prefix(service: TestSuiteService) -> None:
 def test_every_module_has_a_distinct_code() -> None:
     codes = [m.code for m in ValidationModule]
     assert len(codes) == len(set(codes))
+
+
+def test_run_suite_referential_integrity_roundtrips(service: TestSuiteService) -> None:
+    request = ReferentialIntegrityRequest(
+        child_connection_id="src",
+        child_columns=["id"],
+        parent_connection_id="tgt",
+        parent_columns=["id"],
+    )
+    suite = service.save_suite(
+        project_id="default",
+        name="ORDERS_FK",
+        module=ValidationModule.REFERENTIAL_INTEGRITY,
+        config=serialize_request(request),
+    )
+    assert suite.name == "RI_ORDERS_FK"
+
+    outcome = service.run_suite(suite.suite_id)
+
+    assert outcome.error_message is None
+    assert outcome.run is not None
+    assert outcome.run.module == ValidationModule.REFERENTIAL_INTEGRITY
+    assert outcome.run.summary["orphan_rows"] == 0

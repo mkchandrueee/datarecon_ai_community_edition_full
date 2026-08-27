@@ -17,6 +17,7 @@ from sqlalchemy import text
 from config.settings import settings
 from datarecon.domain.entities.column_catalog_metadata import ColumnCatalogMetadata
 from datarecon.domain.entities.connection import Connection
+from datarecon.domain.entities.foreign_key_metadata import ForeignKeyMetadata
 from datarecon.domain.enums import (
     ConnectionCategory,
     FileFormat,
@@ -147,6 +148,44 @@ class DataExtractor:
             return columns
         except Exception:
             logger.warning("Catalog inspection failed for table '%s'", table, exc_info=True)
+            return None
+        finally:
+            engine.dispose()
+
+    def get_foreign_keys(
+        self, conn: Connection, table: str, secret: str = ""
+    ) -> list[ForeignKeyMetadata] | None:
+        """Foreign keys declared on a physical table (ADR-0012).
+
+        Same availability rules as get_catalog_columns: SQLAlchemy-backed
+        relational connections with a real table name. Returns None when the
+        catalog can't be read, and an empty list when the table simply has no
+        declared foreign keys — those mean different things to the caller.
+        """
+        if conn.category != ConnectionCategory.RELATIONAL or not self._engines.supports(
+            conn.database_type
+        ):
+            return None
+        schema, table_name = (table.split(".", 1) if "." in table else (None, table))
+        schema = schema or conn.schema_name or None
+        engine = self._engines.create(conn, secret)
+        try:
+            inspector = sqlalchemy.inspect(engine)
+            if not inspector.has_table(table_name, schema=schema):
+                return None
+            return [
+                ForeignKeyMetadata(
+                    name=fk.get("name"),
+                    columns=list(fk.get("constrained_columns") or []),
+                    referred_table=fk.get("referred_table") or "",
+                    referred_schema=fk.get("referred_schema"),
+                    referred_columns=list(fk.get("referred_columns") or []),
+                )
+                for fk in inspector.get_foreign_keys(table_name, schema=schema)
+                if fk.get("referred_table")
+            ]
+        except Exception:
+            logger.warning("Foreign-key inspection failed for '%s'", table, exc_info=True)
             return None
         finally:
             engine.dispose()

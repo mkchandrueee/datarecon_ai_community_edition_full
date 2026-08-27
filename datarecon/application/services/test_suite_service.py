@@ -33,6 +33,10 @@ from datarecon.application.services.record_count_service import (
     RecordCountRequest,
     RecordCountService,
 )
+from datarecon.application.services.referential_integrity_service import (
+    ReferentialIntegrityRequest,
+    ReferentialIntegrityService,
+)
 from datarecon.application.services.schema_validation_service import (
     SchemaValidationRequest,
     SchemaValidationService,
@@ -51,6 +55,7 @@ RUNNABLE_MODULES = (
     ValidationModule.NULLABILITY,
     ValidationModule.AGGREGATION,
     ValidationModule.FULL_DATA,
+    ValidationModule.REFERENTIAL_INTEGRITY,
 )
 
 
@@ -98,6 +103,7 @@ class TestSuiteService:
         nullability_service: NullabilityValidationService,
         aggregation_service: AggregationValidationService,
         full_data_service: FullDataValidationService,
+        referential_integrity_service: ReferentialIntegrityService,
     ):
         self._repo = repository
         self._projects = project_repository
@@ -107,6 +113,7 @@ class TestSuiteService:
         self._nullability = nullability_service
         self._aggregation = aggregation_service
         self._full_data = full_data_service
+        self._referential = referential_integrity_service
 
     # ---------- CRUD ----------
     def list_suites(self, project_id: str | None = None) -> list[TestSuite]:
@@ -191,6 +198,9 @@ class TestSuiteService:
         if module == ValidationModule.FULL_DATA:
             outcome = self._full_data.execute(request, project_id, suite_id)
             return outcome.run.status, outcome.run
+        if module == ValidationModule.REFERENTIAL_INTEGRITY:
+            ri_result = self._referential.execute(request, project_id, suite_id)
+            return ri_result.status, ri_result.run
         raise TestSuiteError(f"Running '{module.value}' from a saved Test Suite is not supported.")
 
     @staticmethod
@@ -214,6 +224,8 @@ class TestSuiteService:
                 for s in data.pop("aggregations", [])
             ]
             return AggregationValidationRequest(aggregations=specs, **data)
+        if module == ValidationModule.REFERENTIAL_INTEGRITY:
+            return ReferentialIntegrityRequest(**data)
         if module == ValidationModule.FULL_DATA:
             raw_config = data.pop("config", None)
             return FullValidationRequest(

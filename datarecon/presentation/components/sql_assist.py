@@ -11,7 +11,7 @@ import streamlit as st
 
 from datarecon.application.services.sql_generation_service import GeneratedSQL
 from datarecon.domain.enums import ValidationModule
-from datarecon.presentation.components.extraction_inputs import PENDING_QUERY_SUFFIX
+from datarecon.presentation.components.extraction_inputs import stage_query
 from datarecon.presentation.container import ServiceContainer
 
 
@@ -57,7 +57,7 @@ def render_sql_assist(
         # Staged, not written directly: the SQL box already exists on this run,
         # and Streamlit rejects writes to a live widget's key. extraction_inputs
         # picks this up before creating the box on the next run.
-        st.session_state[f"{key_prefix}{PENDING_QUERY_SUFFIX}"] = statement.sql
+        stage_query(key_prefix, statement.sql)
         st.session_state[f"{key_prefix}_sql_assist_result"] = statement
         st.rerun()
 

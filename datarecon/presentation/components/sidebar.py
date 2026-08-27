@@ -16,6 +16,7 @@ PAGES = (
     "Duplicate Validation",
     "Nullability Validation",
     "Full Data Validation",
+    "Referential Integrity",
     "Aggregation Validation",
     "Data Profiling",
     "File Comparison",
