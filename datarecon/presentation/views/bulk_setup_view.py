@@ -78,7 +78,7 @@ def render(container: ServiceContainer) -> None:
         st.caption(f"{len(tables)} table(s) recognised.")
 
     if st.button(
-        "Generate SQL",
+        "✨ AI Generate SQL",
         type="primary",
         disabled=not (source_id and tables and modules),
     ):

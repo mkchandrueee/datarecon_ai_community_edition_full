@@ -348,3 +348,61 @@ def test_run_suite_referential_integrity_roundtrips(service: TestSuiteService) -
     assert outcome.run is not None
     assert outcome.run.module == ValidationModule.REFERENTIAL_INTEGRITY
     assert outcome.run.summary["orphan_rows"] == 0
+
+
+# ---------- bulk run / delete ----------
+
+
+def _saved(service: TestSuiteService, name: str, module=ValidationModule.SCHEMA):
+    request = SchemaValidationRequest(source_connection_id="src", target_connection_id="tgt")
+    return service.save_suite(
+        project_id="default", name=name, module=module, config=serialize_request(request)
+    )
+
+
+def test_run_suites_returns_one_outcome_per_suite(service: TestSuiteService) -> None:
+    ids = [_saved(service, n).suite_id for n in ("A", "B", "C")]
+
+    outcomes = service.run_suites(ids)
+
+    assert len(outcomes) == 3
+    assert [o.suite.name for o in outcomes] == ["SC_A", "SC_B", "SC_C"]
+    assert all(o.run is not None for o in outcomes)
+
+
+def test_run_suites_preserves_order(service: TestSuiteService) -> None:
+    ids = [_saved(service, n).suite_id for n in ("Z", "A")]
+    assert [o.suite.name for o in service.run_suites(ids)] == ["SC_Z", "SC_A"]
+
+
+def test_run_suites_continues_past_a_missing_suite(service: TestSuiteService) -> None:
+    """One bad id must not cost you the results of every other suite."""
+    good = _saved(service, "GOOD").suite_id
+
+    outcomes = service.run_suites([good, "does-not-exist", good])
+
+    assert len(outcomes) == 3
+    assert outcomes[0].status != RunStatus.ERROR
+    assert outcomes[1].status == RunStatus.ERROR
+    assert "not found" in outcomes[1].error_message
+    assert outcomes[2].status != RunStatus.ERROR
+
+
+def test_run_suites_with_no_ids(service: TestSuiteService) -> None:
+    assert service.run_suites([]) == []
+
+
+def test_delete_suites_removes_all_of_them(service: TestSuiteService) -> None:
+    ids = [_saved(service, n).suite_id for n in ("A", "B")]
+
+    assert service.delete_suites(ids) == 2
+    assert service.list_suites() == []
+
+
+def test_delete_suites_counts_only_what_existed(service: TestSuiteService) -> None:
+    existing = _saved(service, "A").suite_id
+    assert service.delete_suites([existing, "ghost"]) == 1
+
+
+def test_delete_suites_with_no_ids(service: TestSuiteService) -> None:
+    assert service.delete_suites([]) == 0

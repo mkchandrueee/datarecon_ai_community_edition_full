@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -154,7 +155,33 @@ class TestSuiteService:
     def delete_suite(self, suite_id: str) -> bool:
         return self._repo.delete(suite_id)
 
+    def delete_suites(self, suite_ids: Sequence[str]) -> int:
+        """Delete several suites, returning how many actually existed."""
+        return sum(1 for suite_id in suite_ids if self._repo.delete(suite_id))
+
     # ---------- execution (regression re-run) ----------
+    def run_suites(self, suite_ids: Sequence[str]) -> list[TestSuiteRunOutcome]:
+        """Run several suites in order, one outcome each.
+
+        A suite that fails does not stop the others — a bulk regression run is
+        only useful if it tells you about every suite, not just up to the first
+        broken one. A suite id that no longer exists is reported as an ERROR
+        outcome rather than raising, for the same reason.
+        """
+        outcomes: list[TestSuiteRunOutcome] = []
+        for suite_id in suite_ids:
+            try:
+                outcomes.append(self.run_suite(suite_id))
+            except TestSuiteError as exc:
+                missing = TestSuite(
+                    project_id="", name=suite_id, module=ValidationModule.SCHEMA, config={}
+                )
+                outcomes.append(
+                    TestSuiteRunOutcome(missing, RunStatus.ERROR, None, error_message=str(exc))
+                )
+        return outcomes
+
+
     def run_suite(self, suite_id: str) -> TestSuiteRunOutcome:
         suite = self._repo.get_by_id(suite_id)
         if suite is None:

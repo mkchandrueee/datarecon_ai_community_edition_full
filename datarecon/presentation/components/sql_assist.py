@@ -1,5 +1,5 @@
 # datarecon/presentation/components/sql_assist.py
-# The "Generate SQL" button that sits beside each module's extraction inputs.
+# The "AI Generate SQL" button that sits beside each module's extraction inputs.
 #
 # Writing the same SELECT by hand for both sides of every module is the most
 # repetitive part of setting up a validation, and a typo in a column name only
@@ -21,7 +21,7 @@ def render_sql_assist(
     connection_id: str | None,
     key_prefix: str,
     table: str | None,
-    label: str = "Generate SQL",
+    label: str = "✨ AI Generate SQL",
 ) -> GeneratedSQL | None:
     """Render the generate button for one side of a module's form.
 
