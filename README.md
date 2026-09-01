@@ -57,6 +57,30 @@ Environment variables (or a `.env` file — see `.env.example`):
 |---|---|---|
 | `DATARECON_KEY_PATH` | `data/.datarecon.key` | Path to the Fernet encryption key for stored credentials |
 | `DATARECON_CONNECT_TIMEOUT` | `10` | Connection test timeout, in seconds |
+| `DATARECON_SCHEDULE_TZ` | `UTC` | Timezone cron schedules are read in |
+| `DATARECON_SCHEDULER_INTERVAL` | `60` | Seconds between scheduler ticks |
+| `DATARECON_NOTIFY_ON` | `failure` | `failure`, `always`, or `never` |
+| `DATARECON_SMTP_HOST` / `_PORT` / `_USER` / `_PASSWORD` / `_TLS` | — | SMTP server for email notifications |
+| `DATARECON_NOTIFY_FROM` / `DATARECON_NOTIFY_TO` | — | Sender, and comma-separated recipients |
+| `DATARECON_NOTIFY_WEBHOOK` | — | Slack/Teams incoming-webhook URL |
+
+## Scheduling
+
+Give a Test Suite a cron schedule on the **Test Suites** page, then run the
+scheduler — it is a separate process, because a Streamlit server only executes
+code while a browser session is driving it.
+
+```bash
+python -m datarecon.scheduler            # tick every minute until stopped
+python -m datarecon.scheduler --once     # one tick, for OS cron / Task Scheduler
+python -m datarecon.scheduler --list     # what is scheduled, and when it next fires
+```
+
+Notifications go out when a scheduled run fails, over email and/or an incoming
+webhook — whichever the environment above configures. No channel configured is
+a valid setup: schedules still run and results are still recorded. Missed
+minutes are not caught up, so a scheduler that was down does not fire a backlog
+when it returns. See ADR-0014 for the reasoning.
 
 ## Development
 

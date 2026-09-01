@@ -1,7 +1,8 @@
 # ADR-0005: Projects and Test Suites (saved, re-runnable configurations)
 
 ## Status
-Accepted
+Accepted — the scheduling deferral below is superseded by ADR-0014,
+which builds the scheduler these fields were reserved for.
 
 ## Context
 The Master PRD's Community Edition scope (ADR-0002) does not name a

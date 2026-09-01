@@ -7,6 +7,7 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
+from datarecon.application.services.scheduler_service import SchedulerError
 from datarecon.domain.entities.test_suite import TestSuite
 from datarecon.domain.enums import ValidationModule
 from datarecon.presentation.components.report_export import render_csv_download_button
@@ -25,6 +26,8 @@ _PENDING_SELECTION_KEY = "ts_bulk_selection_pending"
 #: Carries the delete confirmation across the rerun that follows it.
 _DELETED_MESSAGE_KEY = "ts_bulk_deleted_message"
 _DELETE_ARMED_KEY = "ts_bulk_delete_armed"
+#: Carries the schedule confirmation across the rerun that follows saving one.
+_SCHEDULE_MESSAGE_KEY = "ts_schedule_message"
 _NON_PARAM_KEYS = {
     "name",
     "source_connection_id",
@@ -230,12 +233,116 @@ def _render_bulk_actions(container: ServiceContainer, suites: list[TestSuite]) -
         )
 
 
+_CRON_PRESETS = {
+    "Every hour": "0 * * * *",
+    "Every day at 06:00": "0 6 * * *",
+    "Weekdays at 06:00": "0 6 * * 1-5",
+    "Every Monday at 07:30": "30 7 * * 1",
+    "First of the month at 02:00": "0 2 1 * *",
+}
+
+
+def _render_schedule(container: ServiceContainer, suite: TestSuite) -> None:
+    """Attach a cron schedule to a suite for unattended execution (ADR-0014)."""
+    scheduler = container.scheduler_service
+    with st.expander(
+        f"⏰ Schedule — {'enabled' if suite.schedule_enabled else 'not scheduled'}",
+        expanded=suite.schedule_enabled,
+    ):
+        st.caption(
+            f"Schedules are read in **{scheduler.timezone_name}** and are executed by the "
+            "scheduler process (`python -m datarecon.scheduler`), not by this page."
+        )
+
+        preset = st.selectbox(
+            "Preset",
+            ["Custom", *_CRON_PRESETS],
+            key=f"ts_sched_preset_{suite.suite_id}",
+            help="Pick a common schedule, or choose Custom and write the cron yourself.",
+        )
+        default_cron = _CRON_PRESETS.get(preset, suite.schedule_cron or "")
+        cron = st.text_input(
+            "Cron expression (minute hour day-of-month month day-of-week)",
+            value=default_cron,
+            key=f"ts_sched_cron_{suite.suite_id}",
+            placeholder="0 6 * * 1-5",
+        )
+        enabled = st.checkbox(
+            "Run on this schedule",
+            value=suite.schedule_enabled,
+            key=f"ts_sched_enabled_{suite.suite_id}",
+        )
+
+        # Show what the expression means before it is saved — a cron field is
+        # quick to write and hard to read back.
+        if cron.strip():
+            try:
+                upcoming = scheduler.next_runs(cron, 3)
+                st.caption(
+                    "Next runs: "
+                    + ", ".join(m.strftime("%a %d %b %H:%M") for m in upcoming)
+                    + f"  ({scheduler.timezone_name})"
+                )
+            except SchedulerError as exc:
+                st.warning(str(exc))
+
+        if st.button("Save schedule", key=f"ts_sched_save_{suite.suite_id}"):
+            try:
+                scheduler.set_schedule(suite.suite_id, cron, enabled)
+            except SchedulerError as exc:
+                st.error(str(exc))
+            else:
+                st.session_state[_SCHEDULE_MESSAGE_KEY] = (
+                    f"Schedule saved for '{suite.name}'."
+                    if enabled
+                    else f"Schedule disabled for '{suite.name}'."
+                )
+                st.rerun()
+
+
+def _render_schedule_overview(container: ServiceContainer) -> None:
+    """Everything that is scheduled, in one table.
+
+    Per-suite settings answer "when does this run?"; only a combined view
+    answers "what runs tonight?", which is the question asked after a failure.
+    """
+    scheduled = container.scheduler_service.scheduled_suites()
+    if not scheduled:
+        return
+
+    st.subheader("Schedules")
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {
+                    "Test Suite": s.name,
+                    "Cron": s.schedule_cron,
+                    "Enabled": "Yes" if s.schedule_enabled else "No",
+                    "Last Run": s.last_run_at,
+                    "Last Status": s.last_run_status.value if s.last_run_status else "never run",
+                }
+                for s in sorted(scheduled, key=lambda s: s.name)
+            ]
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.caption(
+        "Start the runner with `python -m datarecon.scheduler`, or have OS cron / Task "
+        "Scheduler call `python -m datarecon.scheduler --once` every minute."
+    )
+
+
 def render(container: ServiceContainer) -> None:
     st.header("Test Suites")
     st.caption(
-        "Saved validation configurations you can re-run on demand for regression checks. "
-        "Scheduled/automatic execution is planned for a later phase."
+        "Saved validation configurations you can re-run on demand, in bulk, "
+        "or on a schedule."
     )
+
+    schedule_message = st.session_state.pop(_SCHEDULE_MESSAGE_KEY, None)
+    if schedule_message:
+        st.success(schedule_message)
 
     projects = container.project_service.list_projects()
     project_names = [_ALL_PROJECTS, *[p.name for p in projects]]
@@ -255,6 +362,7 @@ def render(container: ServiceContainer) -> None:
 
     project_name_by_id = {p.project_id: p.name for p in projects}
     _render_grouped_suites(suites, project_name_by_id)
+    _render_schedule_overview(container)
     _render_bulk_actions(container, suites)
 
     st.subheader("Run a Single Test Suite")
@@ -265,6 +373,7 @@ def render(container: ServiceContainer) -> None:
         st.caption(suite.description)
     st.subheader("Test Suite Details")
     _render_suite_details(container, suite)
+    _render_schedule(container, suite)
 
     col1, col2 = st.columns(2)
     if col1.button("▶ Run Now", type="primary", key="ts_run_now"):

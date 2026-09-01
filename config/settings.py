@@ -28,5 +28,40 @@ class Settings:
     connect_timeout_seconds: int = int(os.getenv("DATARECON_CONNECT_TIMEOUT", "10"))
     max_records_supported: int = 5_000_000
 
+    # ---- Scheduling (ADR-0014) ----
+    #: Zone the cron expressions are read in. Cron means local time to the
+    #: people who write it, so this is configurable; runs are still stored UTC.
+    schedule_timezone: str = os.getenv("DATARECON_SCHEDULE_TZ", "UTC")
+    #: Seconds between scheduler ticks. Cron's resolution is one minute, so
+    #: ticking faster only re-checks the same minute.
+    scheduler_interval_seconds: int = int(os.getenv("DATARECON_SCHEDULER_INTERVAL", "60"))
+    #: "failure" (default) notifies only when a scheduled run fails or errors;
+    #: "always" notifies on every scheduled run.
+    notify_on: str = os.getenv("DATARECON_NOTIFY_ON", "failure").strip().casefold()
+
+    # ---- Notification channels ----
+    # Credentials are deployment configuration: they come from the environment
+    # and are never written to the metadata database.
+    smtp_host: str = os.getenv("DATARECON_SMTP_HOST", "")
+    smtp_port: int = int(os.getenv("DATARECON_SMTP_PORT", "587"))
+    smtp_username: str = os.getenv("DATARECON_SMTP_USER", "")
+    smtp_password: str = os.getenv("DATARECON_SMTP_PASSWORD", "")
+    smtp_use_tls: bool = os.getenv("DATARECON_SMTP_TLS", "true").strip().casefold() != "false"
+    notify_email_from: str = os.getenv("DATARECON_NOTIFY_FROM", "")
+    notify_email_to: str = os.getenv("DATARECON_NOTIFY_TO", "")
+    notify_webhook_url: str = os.getenv("DATARECON_NOTIFY_WEBHOOK", "")
+
+    @property
+    def email_recipients(self) -> list[str]:
+        return [address.strip() for address in self.notify_email_to.split(",") if address.strip()]
+
+    @property
+    def email_configured(self) -> bool:
+        return bool(self.smtp_host and self.notify_email_from and self.email_recipients)
+
+    @property
+    def webhook_configured(self) -> bool:
+        return bool(self.notify_webhook_url)
+
 
 settings = Settings()

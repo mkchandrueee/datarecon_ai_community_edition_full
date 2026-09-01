@@ -1,9 +1,8 @@
 # datarecon/domain/entities/test_suite.py
 # A Test Suite is a saved, named validation-module configuration (a
 # serialized Request dataclass) that can be re-run later for regression
-# checks. `schedule_cron` / `schedule_enabled` are forward-compatible
-# fields for a later-phase scheduler (see ADR-0005) — Community Edition
-# only supports on-demand re-run, not automatic execution.
+# checks. `schedule_cron` / `schedule_enabled` drive unattended execution by
+# the scheduler process (ADR-0014); ADR-0005 reserved them for exactly this.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
