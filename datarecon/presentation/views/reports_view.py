@@ -17,7 +17,9 @@ from datarecon.application.services.reporting_service import (
     sanitize_export_name,
 )
 from datarecon.application.services.test_suite_service import prefixed_name
+from datarecon.core.mismatch_patterns import infer_business_keys
 from datarecon.domain.enums import ValidationModule
+from datarecon.presentation.components.mismatch_insights import render_mismatch_insights
 from datarecon.presentation.components.mismatch_styling import style_matched, style_mismatch
 from datarecon.presentation.components.report_export import (
     render_csv_download_button,
@@ -112,6 +114,23 @@ def _render_module_reports(container: ServiceContainer) -> None:
     )
     st.caption("Combined report — all modules above")
     render_export_buttons(container.reporting_service, payload, key_prefix="reports_module_report")
+
+
+def _render_insights(sections: dict[str, pd.DataFrame]) -> None:
+    """Explain a stored full-data result, the same as a live one.
+
+    The question "why did this fail?" is asked far more often about a run from
+    last night than about one just executed.
+    """
+    mismatch = sections.get("Mismatches")
+    if mismatch is None:
+        return
+    render_mismatch_insights(
+        mismatch,
+        sections.get("Missing in Target"),
+        sections.get("Extra in Target"),
+        infer_business_keys(mismatch),
+    )
 
 
 def _render_run_history(container: ServiceContainer) -> None:
@@ -216,6 +235,8 @@ def _render_run_history(container: ServiceContainer) -> None:
             "persistence, or its module (e.g. File Comparison) has no row-level output."
         )
     else:
+        _render_insights(detail_sections)
+
         # Extracts are named after what produced them, so a downloaded file is
         # still identifiable a week later: DV_CUSTOMER_MASTER_Mismatches.csv.
         run_label = sanitize_export_name(prefixed_name(run.module, run.name))

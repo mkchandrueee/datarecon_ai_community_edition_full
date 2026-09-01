@@ -15,6 +15,7 @@ from datarecon.core.engine import ComparisonConfig
 from datarecon.domain.enums import ValidationModule
 from datarecon.presentation.components.connection_picker import connection_picker
 from datarecon.presentation.components.extraction_inputs import extraction_inputs
+from datarecon.presentation.components.mismatch_insights import render_mismatch_insights
 from datarecon.presentation.components.mismatch_styling import style_matched, style_mismatch
 from datarecon.presentation.components.report_export import (
     render_detail_csv_downloads,
@@ -129,6 +130,13 @@ def render(container: ServiceContainer) -> None:
         c4.metric("Rows Extra", f"{result.summary['rows_extra_in_target']:,}")
         c5.metric("Rows Mismatched", f"{result.summary['rows_mismatched']:,}")
         c6.metric("Success Pct", f"{result.summary['success_percentage']:.4f}")
+
+        render_mismatch_insights(
+            result.mismatch,
+            result.missing_in_target,
+            result.extra_in_target,
+            business_keys,
+        )
 
         column_counts = _mismatches_by_column(result.mismatch)
         if not column_counts.empty:
