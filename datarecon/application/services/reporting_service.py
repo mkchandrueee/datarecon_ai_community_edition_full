@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -22,9 +23,31 @@ from datarecon.domain.enums import ReportFormat
 
 _PDF_MAX_ROWS_PER_SECTION = 500
 
+#: Rows per download batch for row-level extracts (ADR-0013). Half a million
+#: mismatches in one CSV is a file most desktops open badly and some not at all;
+#: 50k is the size a reviewer can actually work with in Excel.
+DEFAULT_BATCH_ROWS = 50_000
+
+#: xlsx caps a worksheet at 1,048,576 rows including the header, so a section
+#: any larger has to span numbered sheets or the writer raises.
+EXCEL_MAX_ROWS_PER_SHEET = 1_000_000
+
+_UNSAFE_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
+
 
 class ReportingError(ValueError):
     """Raised for malformed or unsupported report requests."""
+
+
+def sanitize_export_name(name: str) -> str:
+    """Turn a section or run name into something safe for a download filename.
+
+    Names reach here from user input (suite names, table names), so they can
+    carry spaces, slashes and punctuation that browsers and file systems handle
+    inconsistently. Runs of unsafe characters collapse to a single underscore.
+    """
+    cleaned = _UNSAFE_FILENAME_CHARS.sub("_", name).strip("_")
+    return cleaned or "export"
 
 
 def _drop_tz(value: Any) -> Any:
@@ -40,6 +63,29 @@ def _has_tz_aware_value(series: pd.Series) -> bool:
 class ReportSection:
     title: str
     dataframe: pd.DataFrame
+
+
+@dataclass(frozen=True)
+class ReportBatch:
+    """One numbered slice of a row-level extract."""
+
+    name: str
+    number: int
+    total: int
+    #: 1-based inclusive row range within the full section; 0/0 when empty.
+    first_row: int
+    last_row: int
+    dataframe: pd.DataFrame
+
+    @property
+    def is_only_batch(self) -> bool:
+        return self.total == 1
+
+    @property
+    def row_range_label(self) -> str:
+        if self.last_row == 0:
+            return "no rows"
+        return f"rows {self.first_row:,}-{self.last_row:,}"
 
 
 @dataclass(frozen=True)
@@ -78,6 +124,47 @@ class ReportingService:
         return {"excel": "xlsx", "csv": "csv", "pdf": "pdf", "json": "json"}[fmt.value]
 
     # ------------------------------------------------------------------ #
+    @staticmethod
+    def batch_frame(
+        name: str, df: pd.DataFrame, batch_rows: int = DEFAULT_BATCH_ROWS
+    ) -> list[ReportBatch]:
+        """Split a row-level extract into numbered batches (ADR-0013).
+
+        A section at or under the threshold comes back as a single batch under
+        its own name, so nothing about small downloads changes. Above it, the
+        section is sliced into `NAME_1`, `NAME_2`, … in row order, covering
+        every row — batching is about file size, never about dropping rows.
+        """
+        if batch_rows < 1:
+            raise ReportingError("batch_rows must be at least 1.")
+
+        rows = len(df)
+        if rows <= batch_rows:
+            return [
+                ReportBatch(
+                    name=name,
+                    number=1,
+                    total=1,
+                    first_row=1 if rows else 0,
+                    last_row=rows,
+                    dataframe=df,
+                )
+            ]
+
+        total = -(-rows // batch_rows)  # ceiling division
+        return [
+            ReportBatch(
+                name=f"{name}_{number}",
+                number=number,
+                total=total,
+                first_row=start + 1,
+                last_row=min(start + batch_rows, rows),
+                dataframe=df.iloc[start : start + batch_rows],
+            )
+            for number, start in enumerate(range(0, rows, batch_rows), start=1)
+        ]
+
+    # ------------------------------------------------------------------ #
     def _to_excel(self, payload: ReportPayload) -> bytes:
         buf = BytesIO()
         with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
@@ -86,10 +173,15 @@ class ReportingService:
             )
             used_names: set[str] = {self._SUMMARY_TITLE}
             for section in payload.sections:
-                sheet_name = self._unique_sheet_name(section.title, used_names)
-                self._excel_safe(section.dataframe).to_excel(
-                    writer, sheet_name=sheet_name, index=False
-                )
+                # A worksheet can't hold more than ~1M rows, so a section past
+                # that spans numbered sheets rather than failing the export.
+                for batch in self.batch_frame(
+                    section.title, section.dataframe, EXCEL_MAX_ROWS_PER_SHEET
+                ):
+                    sheet_name = self._unique_sheet_name(batch.name, used_names)
+                    self._excel_safe(batch.dataframe).to_excel(
+                        writer, sheet_name=sheet_name, index=False
+                    )
         return buf.getvalue()
 
     @staticmethod

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from io import BytesIO
 
 import pandas as pd
 import pytest
@@ -13,6 +14,7 @@ from datarecon.application.services.reporting_service import (
     ReportingService,
     ReportPayload,
     ReportSection,
+    sanitize_export_name,
 )
 from datarecon.domain.enums import ReportFormat
 
@@ -182,3 +184,108 @@ def test_excel_export_handles_tz_aware_value_in_summary(service: ReportingServic
 def test_excel_safe_leaves_naive_frames_untouched(service: ReportingService) -> None:
     table = pd.DataFrame({"a": [1], "when": pd.to_datetime(["2026-01-01"])})
     assert service._excel_safe(table) is table
+
+
+# ---------- batched extracts (ADR-0013) ----------
+
+
+def test_small_frame_is_a_single_unnumbered_batch(service: ReportingService) -> None:
+    """Ordinary downloads keep their plain name — no _1 suffix appears."""
+    df = pd.DataFrame({"a": range(10)})
+
+    batches = service.batch_frame("Mismatches", df, batch_rows=50)
+
+    assert len(batches) == 1
+    assert batches[0].name == "Mismatches"
+    assert batches[0].is_only_batch
+    assert (batches[0].first_row, batches[0].last_row) == (1, 10)
+
+
+def test_frame_exactly_at_threshold_is_not_split(service: ReportingService) -> None:
+    batches = service.batch_frame("X", pd.DataFrame({"a": range(50)}), batch_rows=50)
+
+    assert len(batches) == 1
+    assert batches[0].name == "X"
+
+
+def test_large_frame_splits_into_numbered_batches(service: ReportingService) -> None:
+    df = pd.DataFrame({"a": range(120)})
+
+    batches = service.batch_frame("DV_CUSTOMER_MASTER_PASS", df, batch_rows=50)
+
+    assert [b.name for b in batches] == [
+        "DV_CUSTOMER_MASTER_PASS_1",
+        "DV_CUSTOMER_MASTER_PASS_2",
+        "DV_CUSTOMER_MASTER_PASS_3",
+    ]
+    assert [b.total for b in batches] == [3, 3, 3]
+    assert [(b.first_row, b.last_row) for b in batches] == [(1, 50), (51, 100), (101, 120)]
+
+
+def test_batches_partition_the_frame_without_loss_or_overlap(
+    service: ReportingService,
+) -> None:
+    """Batching is about file size, never about dropping rows."""
+    df = pd.DataFrame({"a": range(1_000)})
+
+    batches = service.batch_frame("X", df, batch_rows=137)
+
+    rebuilt = pd.concat([b.dataframe for b in batches], ignore_index=True)
+    pd.testing.assert_frame_equal(rebuilt, df)
+    assert sum(len(b.dataframe) for b in batches) == len(df)
+
+
+def test_empty_frame_still_yields_one_downloadable_batch(service: ReportingService) -> None:
+    batches = service.batch_frame("Mismatches", pd.DataFrame({"a": []}), batch_rows=50)
+
+    assert len(batches) == 1
+    assert batches[0].row_range_label == "no rows"
+
+
+def test_batch_rows_below_one_is_rejected(service: ReportingService) -> None:
+    with pytest.raises(ReportingError, match="at least 1"):
+        service.batch_frame("X", pd.DataFrame({"a": [1]}), batch_rows=0)
+
+
+def test_row_range_label_is_thousands_separated(service: ReportingService) -> None:
+    batches = service.batch_frame("X", pd.DataFrame({"a": range(3_000)}), batch_rows=2_000)
+
+    assert batches[0].row_range_label == "rows 1-2,000"
+    assert batches[1].row_range_label == "rows 2,001-3,000"
+
+
+def test_oversized_section_spans_numbered_excel_sheets(service: ReportingService) -> None:
+    """xlsx caps a sheet at ~1M rows; the export must not fail on that."""
+    from openpyxl import load_workbook
+
+    import datarecon.application.services.reporting_service as module
+
+    original = module.EXCEL_MAX_ROWS_PER_SHEET
+    module.EXCEL_MAX_ROWS_PER_SHEET = 10
+    try:
+        payload = ReportPayload(
+            title="x",
+            summary={},
+            sections=(ReportSection("Mismatches", pd.DataFrame({"a": range(25)})),),
+        )
+        raw = service.export(payload, ReportFormat.EXCEL)
+    finally:
+        module.EXCEL_MAX_ROWS_PER_SHEET = original
+
+    workbook = load_workbook(BytesIO(raw))
+    assert workbook.sheetnames == ["Summary", "Mismatches_1", "Mismatches_2", "Mismatches_3"]
+
+
+# ---------- export filenames ----------
+
+
+def test_sanitize_export_name_strips_filesystem_unsafe_characters() -> None:
+    assert sanitize_export_name("DV_CUSTOMER MASTER / v2") == "DV_CUSTOMER_MASTER_v2"
+
+
+def test_sanitize_export_name_falls_back_when_nothing_survives() -> None:
+    assert sanitize_export_name("///") == "export"
+
+
+def test_sanitize_export_name_leaves_a_clean_name_alone() -> None:
+    assert sanitize_export_name("DV_CUSTOMER_MASTER_PASS_1") == "DV_CUSTOMER_MASTER_PASS_1"

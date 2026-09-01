@@ -5,20 +5,41 @@ import pandas as pd
 import streamlit as st
 
 from datarecon.application.services.full_data_validation_service import FullValidationRequest
-from datarecon.application.services.reporting_service import ReportPayload, ReportSection
-from datarecon.application.services.test_suite_service import serialize_request
+from datarecon.application.services.reporting_service import (
+    ReportPayload,
+    ReportSection,
+    sanitize_export_name,
+)
+from datarecon.application.services.test_suite_service import prefixed_name, serialize_request
 from datarecon.core.engine import ComparisonConfig
 from datarecon.domain.enums import ValidationModule
 from datarecon.presentation.components.connection_picker import connection_picker
 from datarecon.presentation.components.extraction_inputs import extraction_inputs
 from datarecon.presentation.components.mismatch_styling import style_matched, style_mismatch
 from datarecon.presentation.components.report_export import (
-    render_csv_download_button,
+    render_detail_csv_downloads,
     render_export_buttons,
 )
 from datarecon.presentation.components.run_status import render_status_badge
 from datarecon.presentation.components.test_suite_save import render_save_suite_section
 from datarecon.presentation.container import ServiceContainer
+
+#: Rows rendered in a drill-down grid; the full result is in the downloads.
+#: Highlighting is per-cell, so an unbounded grid stalls the browser.
+_MAX_DISPLAY_ROWS = 5_000
+
+
+def _render_drilldown(df: pd.DataFrame, styler=None) -> None:
+    shown = df.head(_MAX_DISPLAY_ROWS)
+    if styler is not None and not shown.empty:
+        st.dataframe(styler(shown), use_container_width=True, hide_index=True)
+    else:
+        st.dataframe(shown, use_container_width=True, hide_index=True)
+    if len(df) > _MAX_DISPLAY_ROWS:
+        st.caption(
+            f"Previewing the first {_MAX_DISPLAY_ROWS:,} of {len(df):,} rows. "
+            "All rows are in the download(s) below."
+        )
 
 
 def _mismatches_by_column(mismatch: pd.DataFrame) -> pd.Series:
@@ -118,48 +139,43 @@ def render(container: ServiceContainer) -> None:
         tab_missing, tab_extra, tab_mismatch, tab_match = st.tabs(
             ["Missing", "Extra", "Mismatch", "Matched"]
         )
+        # Downloads are named after the run, so files from two tables don't
+        # both land in Downloads as "Mismatch.csv".
+        extract_label = sanitize_export_name(
+            prefixed_name(ValidationModule.FULL_DATA, outcome.run.name)
+        )
         with tab_missing:
-            st.dataframe(result.missing_in_target, use_container_width=True, hide_index=True)
-            render_csv_download_button(
+            _render_drilldown(result.missing_in_target)
+            render_detail_csv_downloads(
                 container.reporting_service,
-                "Missing",
+                f"{extract_label}_Missing",
                 result.missing_in_target,
                 key="fd_dl_missing",
                 label="Download missing CSV",
             )
         with tab_extra:
-            st.dataframe(result.extra_in_target, use_container_width=True, hide_index=True)
-            render_csv_download_button(
+            _render_drilldown(result.extra_in_target)
+            render_detail_csv_downloads(
                 container.reporting_service,
-                "Extra",
+                f"{extract_label}_Extra",
                 result.extra_in_target,
                 key="fd_dl_extra",
                 label="Download extra CSV",
             )
         with tab_mismatch:
-            if result.mismatch.empty:
-                st.dataframe(result.mismatch, use_container_width=True, hide_index=True)
-            else:
-                st.dataframe(
-                    style_mismatch(result.mismatch), use_container_width=True, hide_index=True
-                )
-            render_csv_download_button(
+            _render_drilldown(result.mismatch, style_mismatch)
+            render_detail_csv_downloads(
                 container.reporting_service,
-                "Mismatch",
+                f"{extract_label}_Mismatch",
                 result.mismatch,
                 key="fd_dl_mismatch",
                 label="Download mismatch CSV",
             )
         with tab_match:
-            if result.exact_match.empty:
-                st.dataframe(result.exact_match, use_container_width=True, hide_index=True)
-            else:
-                st.dataframe(
-                    style_matched(result.exact_match), use_container_width=True, hide_index=True
-                )
-            render_csv_download_button(
+            _render_drilldown(result.exact_match, style_matched)
+            render_detail_csv_downloads(
                 container.reporting_service,
-                "Matched",
+                f"{extract_label}_Matched",
                 result.exact_match,
                 key="fd_dl_matched",
                 label="Download matched CSV",

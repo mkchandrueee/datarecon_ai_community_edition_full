@@ -11,11 +11,17 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from datarecon.application.services.reporting_service import ReportPayload, ReportSection
+from datarecon.application.services.reporting_service import (
+    ReportPayload,
+    ReportSection,
+    sanitize_export_name,
+)
+from datarecon.application.services.test_suite_service import prefixed_name
 from datarecon.domain.enums import ValidationModule
 from datarecon.presentation.components.mismatch_styling import style_matched, style_mismatch
 from datarecon.presentation.components.report_export import (
     render_csv_download_button,
+    render_detail_csv_downloads,
     render_export_buttons,
 )
 from datarecon.presentation.components.summary_table import render_summary_table
@@ -25,6 +31,26 @@ _MODULE_FILTER_ALL = "All Modules"
 _ALL_PROJECTS = "All Projects"
 _ALL_TEST_SUITES = "All Test Suites"
 _STYLED_SECTIONS = {"Mismatches": style_mismatch, "Matched": style_matched}
+
+#: Rows rendered in the on-screen grid. Cell-level highlighting builds CSS per
+#: cell, so a half-million-row section would lock the browser up before the
+#: user ever reached the download buttons. The full extract is in the
+#: downloads below the grid — the cap is on the preview only.
+_MAX_DISPLAY_ROWS = 5_000
+
+
+def _render_detail_grid(title: str, df: pd.DataFrame) -> None:
+    shown = df.head(_MAX_DISPLAY_ROWS)
+    styler = _STYLED_SECTIONS.get(title)
+    if styler is not None and not shown.empty:
+        st.dataframe(styler(shown), use_container_width=True, hide_index=True)
+    else:
+        st.dataframe(shown, use_container_width=True, hide_index=True)
+    if len(df) > _MAX_DISPLAY_ROWS:
+        st.caption(
+            f"Previewing the first {_MAX_DISPLAY_ROWS:,} of {len(df):,} rows. "
+            "All rows are in the download(s) below."
+        )
 
 
 def render(container: ServiceContainer) -> None:
@@ -190,17 +216,16 @@ def _render_run_history(container: ServiceContainer) -> None:
             "persistence, or its module (e.g. File Comparison) has no row-level output."
         )
     else:
+        # Extracts are named after what produced them, so a downloaded file is
+        # still identifiable a week later: DV_CUSTOMER_MASTER_Mismatches.csv.
+        run_label = sanitize_export_name(prefixed_name(run.module, run.name))
         tabs = st.tabs(list(detail_sections.keys()))
         for tab, (title, df) in zip(tabs, detail_sections.items(), strict=True):
             with tab:
-                styler = _STYLED_SECTIONS.get(title)
-                if styler is not None and not df.empty:
-                    st.dataframe(styler(df), use_container_width=True, hide_index=True)
-                else:
-                    st.dataframe(df, use_container_width=True, hide_index=True)
-                render_csv_download_button(
+                _render_detail_grid(title, df)
+                render_detail_csv_downloads(
                     container.reporting_service,
-                    title,
+                    f"{run_label}_{title}",
                     df,
                     key=f"reports_dl_detail_{selected_run_id}_{title}",
                     label=f"Download {title} CSV",

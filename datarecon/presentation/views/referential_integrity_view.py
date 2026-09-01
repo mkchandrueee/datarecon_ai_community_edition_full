@@ -11,8 +11,12 @@ import streamlit as st
 from datarecon.application.services.referential_integrity_service import (
     ReferentialIntegrityRequest,
 )
-from datarecon.application.services.reporting_service import ReportPayload, ReportSection
-from datarecon.application.services.test_suite_service import serialize_request
+from datarecon.application.services.reporting_service import (
+    ReportPayload,
+    ReportSection,
+    sanitize_export_name,
+)
+from datarecon.application.services.test_suite_service import prefixed_name, serialize_request
 from datarecon.domain.enums import ValidationModule
 from datarecon.presentation.components.connection_picker import connection_picker
 from datarecon.presentation.components.extraction_inputs import (
@@ -20,7 +24,7 @@ from datarecon.presentation.components.extraction_inputs import (
     stage_table,
 )
 from datarecon.presentation.components.report_export import (
-    render_csv_download_button,
+    render_detail_csv_downloads,
     render_export_buttons,
 )
 from datarecon.presentation.components.run_status import render_status_badge
@@ -28,6 +32,9 @@ from datarecon.presentation.components.test_suite_save import render_save_suite_
 from datarecon.presentation.container import ServiceContainer
 
 _FK_KEY = "ri_detected_fks"
+
+#: Rows rendered on screen; the full extract is in the downloads below.
+_MAX_DISPLAY_ROWS = 5_000
 
 
 def render(container: ServiceContainer) -> None:
@@ -127,10 +134,20 @@ def render(container: ServiceContainer) -> None:
             st.caption(
                 f"{result.distinct_orphan_keys:,} distinct unmatched key value(s)."
             )
-            st.dataframe(result.orphans, use_container_width=True, hide_index=True)
-        render_csv_download_button(
+            st.dataframe(
+                result.orphans.head(_MAX_DISPLAY_ROWS), use_container_width=True, hide_index=True
+            )
+            if len(result.orphans) > _MAX_DISPLAY_ROWS:
+                st.caption(
+                    f"Previewing the first {_MAX_DISPLAY_ROWS:,} of "
+                    f"{len(result.orphans):,} rows. All rows are in the download(s) below."
+                )
+        render_detail_csv_downloads(
             container.reporting_service,
-            "Orphan Rows",
+            sanitize_export_name(
+                prefixed_name(ValidationModule.REFERENTIAL_INTEGRITY, result.run.name)
+            )
+            + "_Orphans",
             result.orphans,
             key="ri_dl_orphans",
             label="Download orphans CSV",
