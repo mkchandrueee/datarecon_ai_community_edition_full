@@ -24,6 +24,7 @@ from datarecon.application.services.referential_integrity_service import (
     ReferentialIntegrityService,
 )
 from datarecon.application.services.reporting_service import ReportingService
+from datarecon.application.services.run_management_service import RunManagementService
 from datarecon.application.services.scheduler_service import SchedulerService
 from datarecon.application.services.schema_validation_service import SchemaValidationService
 from datarecon.application.services.sql_generation_service import SqlGenerationService
@@ -53,5 +54,6 @@ class ServiceContainer:
     suite_report_service: SuiteReportService
     sql_generation_service: SqlGenerationService
     scheduler_service: SchedulerService
+    run_management_service: RunManagementService
     run_repository: IValidationRunRepository
     detail_store: RunDetailStore

@@ -76,6 +76,22 @@ class RunDetailStore:
     def has_detail(self, run_id: str) -> bool:
         return self._manifest_path(run_id).is_file()
 
+    def delete(self, run_id: str) -> bool:
+        """Remove every stored section for a run. False if there was nothing.
+
+        Deleting a run has to take its detail with it: the metadata row is the
+        only thing that knows this directory exists, so leaving the Parquet
+        behind would strand it on disk for good.
+        """
+        run_dir = self._run_dir(run_id)
+        if not run_dir.is_dir():
+            return False
+        for path in sorted(run_dir.iterdir()):
+            if path.is_file():
+                path.unlink()
+        run_dir.rmdir()
+        return True
+
     # ------------------------------------------------------------------ #
     def _run_dir(self, run_id: str) -> Path:
         return self._base_dir / run_id

@@ -248,3 +248,26 @@ def test_archive_respects_other_filters(repo) -> None:
 
     visible = repo.list_filtered(project_id="p1")
     assert [r.run_id for r in visible] == [kept.run_id]
+
+
+# ---------- permanent deletion (ADR-0016) ----------
+
+
+def test_delete_removes_a_run(repo) -> None:
+    run = _added_run(repo, name="GONE")
+
+    assert repo.delete(run.run_id) is True
+    assert repo.get_by_id(run.run_id) is None
+
+
+def test_delete_reports_false_for_an_unknown_run(repo) -> None:
+    assert repo.delete("no-such-run") is False
+
+
+def test_delete_leaves_the_other_runs(repo) -> None:
+    keep = _added_run(repo, name="KEEP")
+    drop = _added_run(repo, name="DROP")
+
+    repo.delete(drop.run_id)
+
+    assert [r.run_id for r in repo.list_recent()] == [keep.run_id]

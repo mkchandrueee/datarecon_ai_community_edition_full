@@ -110,6 +110,12 @@ class SQLiteValidationRunRepository(IValidationRunRepository):
             )
             return cur.rowcount > 0
 
+    def delete(self, run_id: str) -> bool:
+        """Permanently remove one run. Returns False if the run doesn't exist."""
+        with self._db.cursor() as cur:
+            cur.execute("DELETE FROM validation_runs WHERE run_id=?", (run_id,))
+            return cur.rowcount > 0
+
     def list_filtered(
         self,
         project_id: str | None = None,

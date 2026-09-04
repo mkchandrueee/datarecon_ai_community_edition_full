@@ -112,3 +112,29 @@ def test_runs_are_isolated_from_each_other(store: RunDetailStore) -> None:
 
     assert store.load("run-1", "Mismatches")["a"].iloc[0] == 1
     assert store.load("run-2", "Mismatches")["a"].iloc[0] == 2
+
+
+# ---------- deletion (ADR-0016) ----------
+
+
+def test_delete_removes_every_section_for_a_run(tmp_path) -> None:
+    store = RunDetailStore(tmp_path / "details")
+    store.save("run-1", {"Mismatches": pd.DataFrame({"a": [1]}), "Matched": pd.DataFrame({"a": [2]})})
+
+    assert store.delete("run-1") is True
+    assert store.has_detail("run-1") is False
+    assert store.load_all("run-1") == {}
+
+
+def test_delete_leaves_other_runs_alone(tmp_path) -> None:
+    store = RunDetailStore(tmp_path / "details")
+    store.save("run-1", {"Mismatches": pd.DataFrame({"a": [1]})})
+    store.save("run-2", {"Mismatches": pd.DataFrame({"a": [2]})})
+
+    store.delete("run-1")
+
+    assert store.has_detail("run-2") is True
+
+
+def test_delete_reports_false_when_there_was_nothing_stored(tmp_path) -> None:
+    assert RunDetailStore(tmp_path / "details").delete("never-ran") is False

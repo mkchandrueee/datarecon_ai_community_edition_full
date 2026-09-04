@@ -34,6 +34,15 @@ _ALL_PROJECTS = "All Projects"
 _ALL_TEST_SUITES = "All Test Suites"
 _STYLED_SECTIONS = {"Mismatches": style_mismatch, "Matched": style_matched}
 
+_RUNS_SELECTION_KEY = "reports_runs_selection"
+#: Staged selection, applied before the multiselect widget is created.
+_PENDING_RUNS_KEY = "reports_runs_selection_pending"
+#: Carries a confirmation across the rerun that follows a bulk action.
+_RUNS_MESSAGE_KEY = "reports_runs_message"
+_DELETE_ARMED_KEY = "reports_runs_delete_armed"
+#: The built ZIP, held so the download button survives Streamlit's reruns.
+_ZIP_KEY = "reports_runs_zip"
+
 #: Rows rendered in the on-screen grid. Cell-level highlighting builds CSS per
 #: cell, so a half-million-row section would lock the browser up before the
 #: user ever reached the download buttons. The full extract is in the
@@ -133,6 +142,128 @@ def _render_insights(sections: dict[str, pd.DataFrame]) -> None:
     )
 
 
+def _run_label(run) -> str:
+    """A label a person can pick from a list — the UUID alone tells nobody
+    which run they are looking at."""
+    when = run.started_at.strftime("%Y-%m-%d %H:%M") if run.started_at else "—"
+    return f"{run.module.code} · {run.name} · {run.status.value} · {when} · {run.run_id[:8]}"
+
+
+def _render_bulk_run_actions(container: ServiceContainer, runs: list) -> None:
+    """Extract, archive or delete several runs at once (ADR-0016).
+
+    Run history grows faster than anything else here — every scheduled tick
+    adds to it. One-at-a-time is right for inspecting a failure and useless
+    for the two things people do with a backlog: hand over a week of evidence,
+    and clear out the noise.
+    """
+    st.subheader("Bulk Actions")
+    message = st.session_state.pop(_RUNS_MESSAGE_KEY, None)
+    if message:
+        st.success(message)
+
+    by_label = {_run_label(r): r for r in runs}
+    labels = list(by_label)
+
+    # Both quick buttons and the staged write come *before* the multiselect:
+    # Streamlit rejects writes to a widget's own key once it exists this run.
+    pending = st.session_state.pop(_PENDING_RUNS_KEY, None)
+    if pending is not None:
+        st.session_state[_RUNS_SELECTION_KEY] = [x for x in pending if x in by_label]
+
+    quick1, quick2 = st.columns(2)
+    if quick1.button("Select all shown", key="reports_select_all", use_container_width=True):
+        st.session_state[_PENDING_RUNS_KEY] = labels
+        st.rerun()
+    if quick2.button("Clear selection", key="reports_clear_selection", use_container_width=True):
+        st.session_state[_PENDING_RUNS_KEY] = []
+        st.rerun()
+
+    chosen_labels = st.multiselect(
+        "Select runs",
+        labels,
+        key=_RUNS_SELECTION_KEY,
+        help="Pick any number of runs to extract, archive or delete together.",
+    )
+    if not chosen_labels:
+        st.caption("Nothing selected.")
+        return
+
+    chosen = [by_label[label] for label in chosen_labels]
+    chosen_ids = [r.run_id for r in chosen]
+    service = container.run_management_service
+
+    extract_col, archive_col, delete_col = st.columns(3)
+    with extract_col:
+        # Built on click rather than on every rerun: a selection of large runs
+        # is expensive to zip and usually nobody downloads it.
+        if st.button(
+            f"⬇ Build extract ({len(chosen_ids)})", type="primary",
+            key="reports_build_zip", use_container_width=True,
+        ):
+            with st.spinner(f"Packaging {len(chosen_ids)} run(s)..."):
+                st.session_state[_ZIP_KEY] = (
+                    service.export_filename(len(chosen_ids)),
+                    service.build_export(chosen_ids),
+                )
+
+    restoring = all(r.archived for r in chosen)
+    with archive_col:
+        label = "Restore" if restoring else "Archive"
+        if st.button(
+            f"{label} {len(chosen_ids)} run(s)", key="reports_bulk_archive",
+            use_container_width=True,
+        ):
+            result = service.archive_runs(chosen_ids, archived=not restoring)
+            st.session_state[_PENDING_RUNS_KEY] = []
+            st.session_state[_RUNS_MESSAGE_KEY] = (
+                f"{label}d {result.succeeded} run(s)."
+            )
+            st.rerun()
+
+    # Two clicks to delete: archiving is reversible and deletion is not, so
+    # the destructive option asks before it acts.
+    with delete_col:
+        if st.button(
+            f"🗑 Delete {len(chosen_ids)} run(s)", key="reports_bulk_delete_arm",
+            use_container_width=True,
+        ):
+            st.session_state[_DELETE_ARMED_KEY] = chosen_ids
+
+    armed = st.session_state.get(_DELETE_ARMED_KEY)
+    if armed:
+        st.warning(
+            f"Permanently delete {len(armed)} run(s) and their row-level detail? "
+            "This cannot be undone — Archive hides a run without losing it."
+        )
+        confirm, cancel = st.columns(2)
+        if confirm.button("Yes, delete permanently", key="reports_bulk_delete_confirm"):
+            result = service.delete_runs(armed)
+            st.session_state.pop(_DELETE_ARMED_KEY, None)
+            st.session_state.pop(_ZIP_KEY, None)
+            st.session_state[_PENDING_RUNS_KEY] = []
+            st.session_state[_RUNS_MESSAGE_KEY] = f"Deleted {result.succeeded} run(s)."
+            st.rerun()
+        if cancel.button("Cancel", key="reports_bulk_delete_cancel"):
+            st.session_state.pop(_DELETE_ARMED_KEY, None)
+            st.rerun()
+
+    packaged = st.session_state.get(_ZIP_KEY)
+    if packaged:
+        filename, payload = packaged
+        st.download_button(
+            f"⬇ Download {filename} ({len(payload) / 1_048_576:.1f} MB)",
+            data=payload,
+            file_name=filename,
+            mime="application/zip",
+            key="reports_download_zip",
+        )
+        st.caption(
+            "One folder per run holding its summary and row-level detail, plus a "
+            "manifest naming what each folder is."
+        )
+
+
 def _render_run_history(container: ServiceContainer) -> None:
     projects = container.project_service.list_projects()
     suites = container.test_suite_service.list_suites()
@@ -205,6 +336,9 @@ def _render_run_history(container: ServiceContainer) -> None:
         label="Download visible history CSV",
     )
 
+    _render_bulk_run_actions(container, runs)
+
+    st.subheader("Inspect a Run")
     selected_run_id = st.selectbox(
         "Inspect a run", [r.run_id for r in runs], key="reports_selected_run"
     )

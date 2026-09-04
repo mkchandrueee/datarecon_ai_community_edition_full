@@ -30,6 +30,10 @@ class IValidationRunRepository(ABC):
         """Archive or restore a run. False if no such run."""
 
     @abstractmethod
+    def delete(self, run_id: str) -> bool:
+        """Permanently remove a run. False if no such run."""
+
+    @abstractmethod
     def list_filtered(
         self,
         project_id: str | None = None,

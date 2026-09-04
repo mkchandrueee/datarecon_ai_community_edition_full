@@ -25,6 +25,7 @@ from datarecon.application.services.referential_integrity_service import (
     ReferentialIntegrityService,
 )
 from datarecon.application.services.reporting_service import ReportingService
+from datarecon.application.services.run_management_service import RunManagementService
 from datarecon.application.services.scheduler_service import SchedulerService
 from datarecon.application.services.schema_validation_service import SchemaValidationService
 from datarecon.application.services.sql_generation_service import SqlGenerationService
@@ -75,6 +76,7 @@ def build_container() -> ServiceContainer:
     aggregation_service = AggregationValidationService(
         extraction_service, run_repository, detail_store
     )
+    reporting_service = ReportingService()
     full_data_service = FullDataValidationService(extraction_service, run_repository, detail_store)
     referential_integrity_service = ReferentialIntegrityService(
         extraction_service, run_repository, detail_store
@@ -103,7 +105,7 @@ def build_container() -> ServiceContainer:
         referential_integrity_service=referential_integrity_service,
         profiling_service=ProfilingService(extraction_service, run_repository, detail_store),
         file_checksum_service=FileChecksumService(connection_repository, run_repository),
-        reporting_service=ReportingService(),
+        reporting_service=reporting_service,
         dashboard_service=DashboardService(run_repository),
         project_service=ProjectService(project_repository),
         test_suite_service=test_suite_service,
@@ -115,6 +117,9 @@ def build_container() -> ServiceContainer:
             notifier=build_notifier(settings),
             timezone=settings.schedule_timezone,
             notify_on=settings.notify_on,
+        ),
+        run_management_service=RunManagementService(
+            run_repository, detail_store, reporting_service
         ),
         run_repository=run_repository,
         detail_store=detail_store,
